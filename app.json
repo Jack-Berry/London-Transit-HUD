@@ -7,7 +7,11 @@
   "min_sdk_version": "0.0.10",
   "entrypoint": "index.html",
   "permissions": [
-    { "name": "network", "desc": "Fetches live line status from the TfL API" }
+    {
+      "name": "network",
+      "desc": "Fetches live journey and line status data via the app's TfL proxy",
+      "whitelist": ["https://transit.berrydev.co.uk"]
+    }
   ],
   "supported_languages": ["en"]
 }
