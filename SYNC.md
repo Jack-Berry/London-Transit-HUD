@@ -8,6 +8,8 @@ Coordination file for the two-agent workflow.
 
 Neither agent edits the other's section. Entries are dated, newest at the bottom of each section.
 
+Git is owned by the planning lead: Sol never commits or pushes. The lead commits and pushes to origin after each review round.
+
 ---
 
 ## Plan
