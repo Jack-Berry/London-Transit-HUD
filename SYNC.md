@@ -645,6 +645,13 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** Layout restructure with platform-behaviour stakes; a third field-trip failure is the expensive outcome, so overbuild the care here.
 
+**2026-07-28 — Review of round G (T14). SIGNED OFF.** Lead-verified the full Playwright matrix:
+
+- **390x660 (no keyboard):** body `overflow: hidden`, the app shell is the sole scroller, and From, To, timing and the Compare button are all inside the viewport simultaneously: the planner fits one screen as designed.
+- **390x350 (keyboard-sized):** the suggestion overlay sits fully inside the viewport and renders above later content (z-order verified via `elementFromPoint`), the bottom option is clickable, and after selection the To field is inside the viewport with the INNER container having done the scrolling (`scrollTop: 204`), which is exactly the scroll mechanism field-proven to work in the Even WebView. The full search-select-plan flow completes to journey cards at this size with zero page errors.
+- Compact header landed; hero copy deleted. Version 0.1.2. Hosted copy redeployed.
+- Recommended pre-upload check for Jack: open transit.berrydev.co.uk in phone Safari and run one search: closest available cousin to the Even WKWebView before committing another upload cycle.
+
 ### 2026-07-28 — Queued, not yet tasked: glasses HUD element customisation (Jack's idea, 2026-07-28)
 
 Let the user toggle individual HUD elements on the glasses (arrival time, stage counter, stop count, names line) from a phone-side settings section. Good product feature; not tasked yet, and explicitly NOT the fix for the scroll bug (the unreachable To field already existed below the fold; the WebView was refusing page scroll regardless of content quantity). Revisit after the restyle round.
@@ -828,6 +835,15 @@ Jack likes the phone app's polish but it is not his vibe. A visual revision roun
 - **Decisions/surprises:** The delayed callbacks confirm the relevant input is still focused before scrolling, preventing a stale timer from moving the page after the user has left the field. Suggestion-render scrolling is tracked per focus, so subsequent result refreshes during that focus do not repeatedly pull the page. The browser-control surface reported no available browser in this session; this is an environment limitation rather than an app error.
 - **Verification:** Root and proxy builds pass and `git diff --check` passes. Standing safety greps remain clean: no direct TfL origin, forbidden browser storage, `VITE_`, or TfL key in `src/`; one startup-page call remains; both event reads use `?? 0`; production contains neither dev hook; and no body/app-shell scroll lock or touch handler was introduced. The exact viewport meta and manifest version are present.
 - **Could not verify / lead action:** I could not run the Playwright 390x350 From/To interaction, bottom-option click, bounding-rect assertion, or the 390x844/desktop visual regression because no controllable browser was available. The lead should run those acceptance checks, followed by Jack's hardware retest after re-upload. No SDK question arose, no SDK documentation was consulted, and no deployment, commit, or push was performed. The pre-existing `.claude/settings.json` change was left untouched.
+
+**2026-07-28 — T14 no-page-scroll phone layout**
+
+- **Scroll ownership:** Locked `html` and `body` to `height: 100%` with `overflow: hidden`. `.app-shell` is now the sole vertical scroller with a `100vh` fallback, `100dvh` when supported, `overflow-y: auto`, contained overscroll, and iOS momentum scrolling. The existing station and results `scrollIntoView` calls therefore target this nearest scrollable ancestor without JavaScript changes.
+- **Compact header:** Replaced the tall mark/eyebrow/headline/copy hero with one semantic heading row containing a smaller mark and `London Transit HUD`. Mobile shell spacing keeps the planner compact; the removed marketing copy was deleted rather than retained as dead markup. The existing planner, field, timing, action, result, and accessibility structure is unchanged.
+- **Overlay and selection flow:** Retained the already-absolute, solid, shadowed suggestion list and T13 VisualViewport sizing/internal scrolling. Added a focused station-field stacking layer plus contained momentum scrolling for the dropdown. Audited `.planner-panel`, `.route-fields`, and `.field-stack`; none clips overflow. Selection still only closes the list and does not focus or auto-jump to To. Results still scroll into view through the inner shell after planning.
+- **Manifest:** Bumped `app.json` to `0.1.2`.
+- **Verification:** Root and proxy builds pass; `git diff --check` and standing safety greps pass. CSS/source checks confirm body scroll is locked, `.app-shell` owns vertical scrolling with the `dvh` enhancement, suggestions remain absolute and internally scrollable, no To auto-focus exists, one startup call remains, both event reads use `?? 0`, and production contains neither development hook nor forbidden key/storage/origin usage.
+- **Could not verify / lead action:** The browser-control surface again reported no available browser, so I could not honestly run the required Playwright bounding-box, z-order screenshot, bottom-option click, 390x350/390x660 full-flow, or desktop visual checks. The lead should run that matrix before re-upload, followed by Jack's iOS hardware retest. No SDK code or glasses layout changed, no SDK documentation was consulted, and there are no questions for the lead. No deployment, commit, or push was performed; the pre-existing `.claude/settings.json` change remains untouched.
 
 ---
 

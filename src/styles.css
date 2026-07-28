@@ -22,15 +22,20 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 html {
   min-width: 320px;
-  min-height: 100%;
   background: #091411;
 }
 
 body {
   min-width: 320px;
-  min-height: 100vh;
   margin: 0;
   background:
     radial-gradient(circle at 12% 0%, rgba(54, 132, 98, 0.18), transparent 33rem),
@@ -59,46 +64,57 @@ input[type="radio"] {
 
 .app-shell {
   width: min(100%, 720px);
+  height: 100vh;
   margin: 0 auto;
   padding: 28px 18px 48px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+  }
 }
 
 .hero {
-  position: relative;
-  padding: 24px 4px 30px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 4px 20px;
 }
 
 .brand-mark {
   display: flex;
+  flex: 0 0 auto;
   align-items: end;
-  gap: 3px;
-  width: 34px;
-  height: 26px;
-  margin-bottom: 24px;
+  gap: 2px;
+  width: 27px;
+  height: 20px;
 }
 
 .brand-mark span {
-  width: 8px;
+  width: 6px;
   border-radius: 999px;
   background: var(--mint);
   box-shadow: 0 0 22px rgba(115, 224, 174, 0.24);
 }
 
 .brand-mark span:nth-child(1) {
-  height: 12px;
+  height: 9px;
 }
 
 .brand-mark span:nth-child(2) {
-  height: 26px;
+  height: 20px;
   background: var(--lime);
 }
 
 .brand-mark span:nth-child(3) {
-  height: 18px;
+  height: 14px;
   background: #4ebd9b;
 }
 
-.eyebrow,
 .step-label {
   margin: 0 0 8px;
   color: var(--mint);
@@ -108,27 +124,17 @@ input[type="radio"] {
   text-transform: uppercase;
 }
 
-h1,
 h2,
 p {
   margin-top: 0;
 }
 
-h1 {
-  max-width: 600px;
-  margin-bottom: 16px;
-  font-size: clamp(2.55rem, 11vw, 5.2rem);
-  font-weight: 680;
-  letter-spacing: -0.06em;
-  line-height: 0.98;
-}
-
-.hero-copy {
-  max-width: 560px;
-  margin-bottom: 0;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.65;
+.brand-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 760;
+  letter-spacing: 0.015em;
+  line-height: 1;
 }
 
 .planner-panel,
@@ -230,6 +236,10 @@ h1 {
 .station-field {
   position: relative;
   min-width: 0;
+}
+
+.station-field:focus-within {
+  z-index: 30;
 }
 
 .station-field label,
@@ -335,11 +345,13 @@ input[data-selected="true"] + .input-state {
   left: 0;
   max-height: 310px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
   border: 1px solid rgba(180, 218, 199, 0.18);
   border-radius: 15px;
   background: #10231d;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.48);
+  -webkit-overflow-scrolling: touch;
 }
 
 .suggestion-option {
@@ -791,12 +803,11 @@ input[data-selected="true"] + .input-state {
 
 @media (min-width: 600px) {
   .app-shell {
-    padding: 48px 28px 72px;
+    padding: 32px 28px 64px;
   }
 
   .hero {
-    padding-top: 28px;
-    padding-bottom: 42px;
+    padding-bottom: 24px;
   }
 
   .planner-panel,
