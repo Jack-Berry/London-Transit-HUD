@@ -209,35 +209,130 @@ function createStatusContainers(): TextContainerProperty[] {
 }
 
 function createStageContainers(page: StagePageContent): TextContainerProperty[] {
-  const topLineCount = page.top.split('\n').length
-  const containers = [
-    new TextContainerProperty({
-      xPosition: 0,
-      yPosition: 0,
-      width: 576,
-      height: topLineCount * 27,
-      borderWidth: 0,
-      borderColor: 5,
-      paddingLength: 0,
-      containerID: 1,
-      containerName: 'header',
-      content: page.top,
-      isEventCapture: 1,
-    }),
-  ]
+  if (page.type === 'ride') {
+    return [
+      new TextContainerProperty({
+        xPosition: page.topLeft.xPosition,
+        yPosition: 0,
+        width: page.topLeft.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 1,
+        containerName: 'route',
+        content: page.topLeft.content,
+        isEventCapture: 1,
+      }),
+      new TextContainerProperty({
+        xPosition: page.topCenter.xPosition,
+        yPosition: 0,
+        width: page.topCenter.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 2,
+        containerName: 'arrival',
+        content: page.topCenter.content,
+        isEventCapture: 0,
+      }),
+      new TextContainerProperty({
+        xPosition: page.topRight.xPosition,
+        yPosition: 0,
+        width: page.topRight.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 3,
+        containerName: 'stage-no',
+        content: page.topRight.content,
+        isEventCapture: 0,
+      }),
+      new TextContainerProperty({
+        xPosition: page.bottomDeparture.xPosition,
+        yPosition: 207,
+        width: page.bottomDeparture.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 4,
+        containerName: 'depart',
+        content: page.bottomDeparture.content,
+        isEventCapture: 0,
+      }),
+      new TextContainerProperty({
+        xPosition: page.bottomArrival.xPosition,
+        yPosition: 207,
+        width: page.bottomArrival.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 5,
+        containerName: 'destination',
+        content: page.bottomArrival.content,
+        isEventCapture: 0,
+      }),
+      new TextContainerProperty({
+        xPosition: page.bottomBar.xPosition,
+        yPosition: 234,
+        width: page.bottomBar.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 6,
+        containerName: 'bar',
+        content: page.bottomBar.content,
+        isEventCapture: 0,
+      }),
+      new TextContainerProperty({
+        xPosition: page.bottomCount.xPosition,
+        yPosition: 261,
+        width: page.bottomCount.width,
+        height: 27,
+        borderWidth: 0,
+        borderColor: 5,
+        paddingLength: 0,
+        containerID: 7,
+        containerName: 'stop-count',
+        content: page.bottomCount.content,
+        isEventCapture: 0,
+      }),
+    ]
+  }
 
-  if (page.bottom !== undefined) {
-    containers.push(new TextContainerProperty({
-      xPosition: 0,
-      yPosition: 234,
-      width: 576,
-      height: 54,
+  const containers = page.topLines.map((line, index) => (
+    new TextContainerProperty({
+      xPosition: line.xPosition,
+      yPosition: index * 27,
+      width: line.width,
+      height: 27,
       borderWidth: 0,
       borderColor: 5,
       paddingLength: 0,
-      containerID: 2,
-      containerName: 'bar',
-      content: page.bottom,
+      containerID: index + 1,
+      containerName: `top-${index + 1}`,
+      content: line.content,
+      isEventCapture: index === 0 ? 1 : 0,
+    })
+  ))
+
+  if (page.bottomLine !== undefined) {
+    containers.push(new TextContainerProperty({
+      xPosition: page.bottomLine.xPosition,
+      yPosition: 261,
+      width: page.bottomLine.width,
+      height: 27,
+      borderWidth: 0,
+      borderColor: 5,
+      paddingLength: 0,
+      containerID: containers.length + 1,
+      containerName: 'controls',
+      content: page.bottomLine.content,
       isEventCapture: 0,
     }))
   }
