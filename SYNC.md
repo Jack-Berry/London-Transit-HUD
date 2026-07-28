@@ -597,6 +597,30 @@ Acceptance: builds and greps pass; simulator screenshot shows visibly uniform ga
 
 Hosted copy redeployed with T12b. The glasses journey experience is now verified across short, long, bus, walk-between and rail stage types.
 
+### 2026-07-28 — Round F: hardware hotfix, keyboard covers the suggestions (T13)
+
+First field bug, found by Jack on real hardware: in the Even app's WebView, the on-screen keyboard covers the suggestion list under the From/To inputs and the page cannot be scrolled to reach it, so a journey cannot be started. Desktop browsers and the simulator never show a keyboard, which is why every prior test missed it. Phone-side fix only; no glasses code.
+
+#### T13 — Keep the suggestion list visible above the keyboard
+
+Four changes in `index.html` / `src/phone.ts` / `src/styles.css`:
+
+1. **Viewport meta:** change to `content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"`. On Chromium-based WebViews (Android) this makes the keyboard shrink the layout viewport instead of overlaying it, which fixes the "cannot scroll" half of the bug on its own.
+2. **Scroll the active field up on focus:** on `focus` of either search input, after a ~300ms delay (keyboard settle), `scrollIntoView({ block: 'start', behavior: 'smooth' })` the field's containing `.station-field`, so input plus suggestions occupy the space above the keyboard. Repeat once when suggestions first render for that focus.
+3. **Constrain the dropdown to the visible viewport:** when showing suggestions, set the list's `max-height` from the VisualViewport API: `window.visualViewport.height` minus the list's `getBoundingClientRect().top` minus a 12px margin, floored at 120px, with `overflow-y: auto` so the list scrolls internally. Recompute on `visualViewport` `resize` and `scroll` events while the list is open (remove listeners on hide). Fallback when `window.visualViewport` is undefined: `max-height: 40vh`. iOS WKWebView does not resize the layout viewport for keyboards, so this VisualViewport path is what saves iOS.
+4. **No scroll locking:** verify nothing (CSS `overflow: hidden` on body/app-shell, or touch handlers) prevents page scrolling while the keyboard is open; fix if found.
+
+Also bump `version` in `app.json` to `0.1.1` (the store upload is per-version; the fix ships as a new upload).
+
+Acceptance criteria:
+
+- Builds and standing greps pass.
+- Playwright with a keyboard-sized viewport (390x350): typing in From shows the suggestion list fully inside the viewport, internally scrollable, and an option at the list's bottom can be clicked. Same for To. No regression at full height (390x844) or desktop width.
+- The suggestions list never renders taller than the visual viewport allows (assert via bounding rect in the test).
+- Real verification is Jack retesting on hardware after re-upload; the criteria above are the best pre-hardware proxy we have.
+
+Effort recommendation for Jack: **medium.** Small surface, but viewport behaviour differs per platform and the code must degrade gracefully.
+
 ### 2026-07-28 — Queued, not yet tasked: phone UI restyle
 
 Jack likes the phone app's polish but it is not his vibe. A visual revision round is queued, **blocked on Jack providing reference examples** (apps or sites whose look he wants, plus specific dislikes about the current design). The lead will translate the examples into a concrete restyle spec for Sol once they arrive. Functionality, markup structure and accessibility are to be preserved; this is a skin, not a rebuild.
