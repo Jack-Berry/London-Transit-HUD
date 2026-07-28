@@ -623,6 +623,32 @@ Effort recommendation for Jack: **medium.** Small surface, but viewport behaviou
 
 **2026-07-28 — Review of round F (T13). SIGNED OFF.** Lead-verified with Playwright at a keyboard-sized 390x350 viewport: on focus the station field scrolls to the top, the suggestion list constrains itself to the visual viewport (256px in the test run, bounding box fully inside the visible area), and the bottom-most option can be scrolled to and clicked, the exact interaction that was impossible on hardware. Full-height and desktop regress clean with no page errors. Code review: spec implemented faithfully with good judgement beyond it (stale-focus guards on the delayed scrolls, per-focus scroll-once tracking, VisualViewport listeners installed only while the list is open and removed on hide, 40vh fallback). Sol's scroll-lock audit found nothing to remove, consistent with the lead's read. Version bumped to 0.1.1. Hosted copy redeployed; a fresh `.ehpk` will be packed when Jack asks for it. Final verdict rests with Jack's hardware retest.
 
+### 2026-07-28 — Round G: no-page-scroll layout (T14), from field evidence
+
+Second hardware round on iOS: T13's in-list scrolling worked, but the page itself cannot be scrolled in the Even app's WKWebView at all: Jack could not reach the To field below the fold, and after selecting a From station the page stayed stuck. Diagnosis from the evidence: the Flutter WebView wrapper owns the native scroll view (its keyboard accessory bar is visible overlaying the page) and eats page/body scrolling, while **element-level `overflow-y: auto` scrolling demonstrably works** (Jack scrolled inside the results list). Conclusion: stop relying on page scroll anywhere.
+
+#### T14 — Restructure the phone layout so page scroll is never needed
+
+1. **Scroll ownership moves inside:** `html, body { height: 100%; overflow: hidden; }` and the app shell becomes the scroller: `height: 100dvh` (`100vh` fallback via `@supports`), `overflow-y: auto`, `-webkit-overflow-scrolling: touch`. Every scroll the app ever needs now happens in an element, which is the kind this WebView allows. All existing `scrollIntoView` calls retarget naturally (they scroll the nearest scrollable ancestor); verify each still behaves.
+2. **Compact header:** replace the hero block (brand mark, headline, copy) with one compact row: small brand mark plus "London Transit HUD" on a single line. Goal: From, To, timing control and the Compare button all visible together on a keyboard-less ~390x660 viewport without scrolling. Keep the removed hero copy as a comment or delete it; Jack's restyle round will revisit branding anyway.
+3. **Suggestions become an overlay:** `.station-field` gets `position: relative`; the suggestions list becomes `position: absolute` under the input (full field width, `z-index` above the form, solid background, subtle shadow so it reads as a layer). It overlays the content below instead of pushing it down, so nothing ever needs scrolling to complete a selection. The T13 VisualViewport max-height logic and internal scrolling carry over unchanged. Ensure no ancestor of `.station-field` clips it (`overflow` audit on `.route-fields`, `.field-stack`, the panel).
+4. **Selection flow:** after choosing a From suggestion, focus does NOT auto-jump to To (the keyboard covering a fresh field mid-layout-shift on iOS is asking for trouble); the To field is simply visible right there. After Go, the existing `scrollIntoView` for results now scrolls the inner container; verify.
+5. Bump `app.json` version to `0.1.2`.
+
+Acceptance criteria:
+
+- Builds and standing greps pass.
+- Playwright at 390x660 (no keyboard): From, To, timing and Compare button all visible without any scrolling; body reports `overflow: hidden`; the app shell is the scrolling element.
+- Playwright at 390x350 (keyboard-sized): typing in From shows the overlay list fully inside the viewport, internally scrollable, bottom option clickable; **the To field is reachable after selection with NO page scroll** (it sits in the visible layout, assert its bounding box is inside the viewport after the overlay closes).
+- The overlay renders above later content (z-order screenshot check) and closes on selection and outside-tap as before.
+- Full journey flow (search, select both ends, plan, cards, Go) passes at both sizes; desktop unaffected.
+
+Effort recommendation for Jack: **high.** Layout restructure with platform-behaviour stakes; a third field-trip failure is the expensive outcome, so overbuild the care here.
+
+### 2026-07-28 — Queued, not yet tasked: glasses HUD element customisation (Jack's idea, 2026-07-28)
+
+Let the user toggle individual HUD elements on the glasses (arrival time, stage counter, stop count, names line) from a phone-side settings section. Good product feature; not tasked yet, and explicitly NOT the fix for the scroll bug (the unreachable To field already existed below the fold; the WebView was refusing page scroll regardless of content quantity). Revisit after the restyle round.
+
 ### 2026-07-28 — Queued, not yet tasked: phone UI restyle
 
 Jack likes the phone app's polish but it is not his vibe. A visual revision round is queued, **blocked on Jack providing reference examples** (apps or sites whose look he wants, plus specific dislikes about the current design). The lead will translate the examples into a concrete restyle spec for Sol once they arrive. Functionality, markup structure and accessibility are to be preserved; this is a skin, not a rebuild.
