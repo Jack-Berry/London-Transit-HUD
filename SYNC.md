@@ -686,6 +686,31 @@ The 300px screenshot shows the top result's name crushed to a single letter by i
 
 **2026-07-28 — Review of T15b. SIGNED OFF.** Takeover top row now shows a readable name (186px, "King's Cross & St Pancr..." with two chips); chips cap at two in takeover mode; normal-mode rows unchanged. Residual cosmetic nit accepted without action: a chip label can clip partially at the row edge in takeover mode. Version stays 0.1.3 (never uploaded). Hosted copy redeployed. Round H is complete; ready to pack on Jack's request, Safari sanity check recommended first.
 
+### 2026-07-29 — Round I: the phone's active-journey screen (T16), from Jack's live watch
+
+Field validation from the night before: Jack watched a live Victoria line run against londonunderground.live and the interpolated dots tracked the real train credibly. His direction for the phone side: after Go, the phone must not just sit on the planner. It becomes the journey's home screen.
+
+#### T16 — Active journey view, plus clean-slate reset
+
+**When Go is pressed** the planner UI is replaced by an active-journey view (same page, a view swap not an overlay):
+
+- Header: depart and arrive times, total duration, fare, and an End journey button.
+- The full journey outline as an ordered stage list, mirroring the glasses stages: each ride stage shows its mode chip, line/route summary (`instruction.summary`), departure and arrival stops, times, and stop count; each walk stage shows the walk summary and duration plus an **"Open in Google Maps"** link. Use the universal URL `https://www.google.com/maps/dir/?api=1&destination=<lat>,<lon>&travelmode=walking` with the walking leg's arrival point, omitting the origin so Maps navigates from the user's real current position (better than our schedule guess, and no origin field dependency). Open with `target="_blank"`. The lead has NOT yet verified that leg `arrivalPoint` carries `lat`/`lon` on walking legs: **Sol, check the stored journey object at runtime; if lat/lon are absent, fall back to `destination=<urlencoded commonName>`.** Do not guess other fields.
+- The live stage is highlighted, driven by the same clock interpolation the glasses use (import the existing timeline helpers from journey-mode.ts rather than duplicating the maths), updated on a coarse tick (10s is plenty for the phone).
+- **End journey**: clears the journey state, returns the glasses to the status board (set state inactive, rebuild the status layout through the existing gate, resume the status refresh interval), and returns the phone to a CLEAN planner: both station fields, timing control and results reset to their initial state, ready for the next plan (Jack's request: no stale search debris).
+- **Restore path:** on load (including the background-migration reload), if the restored journey state is active, the phone shows the active-journey view, not the planner. This closes the phone side of the migration loop.
+
+Acceptance criteria:
+
+- Builds and standing greps pass; no new dependencies.
+- Playwright full flow at 390x660: plan, Go: the planner is replaced by the active view showing the correct stage list for a multi-leg journey (use a walk-containing fixture); walking stages carry a Maps link whose href matches the expected pattern; End journey returns to a pristine planner (both inputs empty, no results section, timing on Now) and the glasses (simulator) return to the status board with the refresh log resuming.
+- The live-stage highlight moves when tested with a dev-clock offset (one mid-journey offset check in the simulator webview is sufficient).
+- Glasses journey behaviour is otherwise untouched (simulator spot-check: stages, swipes, alerts unaffected).
+
+Effort recommendation for Jack: **high.** New view, cross-module state flow, and a reset path that must not leave ghosts.
+
+**Also queued behind this:** the phone restyle still awaits Jack's reference examples and can ride the same "big phone push" if they arrive; the HUD element customisation and the real-time arrivals correction (upgrade interpolation with TfL's live arrivals feed, now justified by field evidence that schedule drift is the visible gap) remain on the backlog.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
