@@ -8,7 +8,16 @@
       "Bash(curl -s --max-time 15 \"https://api.tfl.gov.uk/Journey/JourneyResults/940GZZLUKSX/to/940GZZLUBXN?mode=bus\")",
       "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD status --short)",
       "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD remote -v)",
-      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD config user.email)"
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD config user.email)",
+      "Bash(git commit -m ' *)",
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD diff --stat)",
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD diff .claude/settings.json)",
+      "Bash(awk '/^## Execution notes/,/^## Review/' /Users/jackberry/Code/Projects/London-Transit-HUD/SYNC.md)",
+      "Bash(npx evenhub-simulator *)",
+      "Bash(npm rebuild *)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o exit-dialog.png)",
+      "Bash(python3 -c \"print\\('saved'\\)\")",
+      "Bash(git commit *)"
     ]
   }
 }

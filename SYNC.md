@@ -180,6 +180,96 @@ This is the app we are actually building. Milestones 2 onward serve this flow. U
 - **Line ordering:** Jack has no preference; milestone 1 keeps whatever order the API returns (it is stable and roughly alphabetical). Sol need not do anything.
 - **Phone-first flow confirmed:** all setup on the phone, including the fastest/cheapest options screen. The glasses only come alive when the user hits Go, so the phone can go in the pocket. Voice input on glasses is a maybe-later, not planned.
 
+### 2026-07-28 — Round 2: unblock T2 and T3 (answers to Sol's questions, verified against the installed SDK)
+
+Both of Sol's round 1 blockers were real gaps in the round 1 spec, and both are now resolved below. The contracts here were read directly from the installed `@evenrealities/even_hub_sdk@0.0.12` type definitions by the lead, so they match what the compiler will accept.
+
+---
+
+#### T3b — Fix the `textContainerUpgrade` build error
+
+The round 1 spec showed a plain object literal; that was wrong. `TextContainerUpgrade` is a **class** and the bridge method takes an instance of it:
+
+```typescript
+// verbatim from the installed SDK:
+// class TextContainerUpgrade {
+//   containerID?: number
+//   containerName?: string
+//   contentOffset?: number
+//   contentLength?: number
+//   content?: string
+//   constructor(data?: Partial<TextContainerUpgrade>)
+// }
+// bridge method: textContainerUpgrade(container: TextContainerUpgrade): Promise<boolean>
+```
+
+Fix at `src/main.ts:130`: import `TextContainerUpgrade` from `@evenrealities/even_hub_sdk` and wrap the existing object in `new TextContainerUpgrade({ ... })`. No other changes to the call. This mirrors how `TextContainerProperty` and `CreateStartUpPageContainer` are already constructed in the same file.
+
+Acceptance criteria:
+- `npm run build` passes clean (tsc plus vite).
+- The refresh path still uses only `textContainerUpgrade` with `containerID: 1`, `containerName: 'status'`, `contentOffset: 0`, `contentLength: 0`.
+
+---
+
+#### T2b — Wire input and lifecycle events (full contract now provided)
+
+Subscription, verbatim from the installed SDK:
+
+```typescript
+// bridge method: onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void
+// the return value is the unsubscribe function
+const unsubscribe = bridge.onEvenHubEvent(event => { ... })
+
+// type EvenHubEvent = {
+//   listEvent?:  List_ItemEvent
+//   textEvent?:  Text_ItemEvent    // { containerID?: number; containerName?: string; eventType?: number }
+//   sysEvent?:   Sys_ItemEvent     // { eventType?: number; eventSource?: number; imuData?: ...; systemExitReasonCode?: number }
+//   audioEvent?: AudioEventPayload
+// }
+```
+
+Discriminate by checking which property is present, in this order: `if (event.textEvent) { ... } else if (event.sysEvent) { ... }`. Ignore `listEvent` and `audioEvent` for now (we have no list or audio).
+
+Event meanings (hardware-verified):
+
+- `textEvent.eventType`: `1` = swipe up, `2` = swipe down. Swipes are the ONLY thing that arrives as `textEvent`.
+- `sysEvent.eventType`: `0` = single tap, `3` = double tap, `4` = foreground enter, `5` = foreground exit, `6` = abnormal exit, `7` = system exit (user confirmed the exit dialog).
+- **Zero-value elision applies:** a single tap arrives with `eventType` equal to `undefined`, not `0`. Read every event field as `event.sysEvent.eventType ?? 0` and `event.textEvent.eventType ?? 0`.
+
+Required behaviour (same as round 1):
+
+- Swipe up/down: `console.log` the direction.
+- Single tap: `console.log` it.
+- Double tap: call `bridge.shutDownPageContainer(1)` (verified signature: `shutDownPageContainer(exitMode?: number): Promise<boolean>`; mode `1` shows the system exit dialog). Do NOT unsubscribe or clean anything up at this point; the user can cancel the dialog.
+- Foreground enter (4): re-render current state (re-send the last board, or trigger an immediate refresh) and resume the 60 second interval.
+- Foreground exit (5): pause the interval (clear it; recreate on enter).
+- System exit (7) and abnormal exit (6): this is where cleanup lives. Call `unsubscribe()` here.
+
+Acceptance criteria:
+- `npm run build` passes.
+- In the simulator: swipes and taps log correctly, double tap triggers the exit dialog.
+- Grep check: every read of `eventType` uses `?? 0` or an equivalent explicit undefined check.
+- Interval is provably paused after foreground exit and resumed after foreground enter (log lines are fine as evidence).
+
+---
+
+#### T3c — Close the in-flight gap on bridge timeouts (correction from review)
+
+`withBridgeTimeout` (src/main.ts:54-69) races the bridge call against a timer, but losing the race does not cancel the underlying BLE call; it is still in flight. Meanwhile `refreshStatuses` clears `isUpdating` in its `finally`, so the next tick can send a second `textContainerUpgrade` while the first is still pending. Concurrent bridge calls can crash the BLE link, so this needs closing.
+
+Fix, concretely: add a module-level `bridgeCallPending: Promise<unknown> | null`. In `updateStatusContainer`, before sending, if `bridgeCallPending` is non-null, skip this update (log and return). Set `bridgeCallPending` to the RAW bridge promise (not the raced one) with a `.finally(() => { bridgeCallPending = null })` attached, then await the raced version as now. That way a timed-out call keeps blocking new sends until it genuinely settles, while the tick logic stays unchanged.
+
+Acceptance criteria:
+- `npm run build` passes.
+- Code shows the raw bridge promise (not the `Promise.race` result) is what gates the next send.
+- A skipped update logs a distinct message so we can spot it in the simulator console.
+
+---
+
+**Vision refinement from Jack (2026-07-28, after round 2):** the app is purely a route planner that does the work for you. No dedicated disruption or status screens: if a line the user needs is disrupted, the app mentions it in the context of their route (at planning time and en route). The milestone 1 status board is a walking-skeleton artefact only and will be replaced, not extended. Milestone 2 planning should reflect this.
+
+**Also for the record, a discovery while verifying the above:** the installed SDK exposes a location API (`getAppLocation(options?): Promise<AppLocation | null>`, `startAppLocationUpdates` / `stopAppLocationUpdates`, `onAppLocationChanged(cb): unsubscribe`, with `AppLocation` carrying `latitude`, `longitude`, `accuracy?`, `speed?`, `heading?`, `timestamp?` and an `AppLocationAccuracy` enum of Low/Medium/High). This substantially de-risks the "current location" and en-route GPS features in the vision: there is a real API, not just a manifest permission. It still needs on-device verification before anything depends on it, and using it will need the `location` permission added to `app.json`. Not tasked yet; M3/M4 material. Sol: do not touch this API in milestone 1.
+
 ---
 
 ---
@@ -188,11 +278,70 @@ This is the app we are actually building. Milestones 2 onward serve this flow. U
 
 (Sol's section. Sol: append dated entries here. What you did per task, decisions you took, anything that surprised you, anything you could not verify.)
 
+**2026-07-28 — T2/T3 implementation**
+
+- **T2:** Replaced the single full-screen startup text container with the specified `status` (576x252, sole event-capturing container) and `footer` (576x36, non-event-capturing) containers. The startup call remains a single lifetime call and logs its numeric result directly.
+- **T2 blocker / question for the lead:** Input and lifecycle event wiring is not implemented because the task does not quote the SDK method used to subscribe to events, its callback/event shape, or the unsubscribe return/signature, and the known-good `src/main.ts` contains no event example. Please provide the exact, hardware-verified subscription and unsubscription code/signatures needed for text and system events. In particular, I need the event envelope fields required to distinguish text swipes from system taps/lifecycle events. I did not infer or inspect undocumented SDK behaviour.
+- **T3:** Added the keyless TfL status fetch using one exported `API_BASE`, API-order rendering with names truncated/padded to 13 characters, a 475-character display budget with truncation logging, immediate initial refresh, and a guarded 60-second refresh interval. Updates use only `textContainerUpgrade` with the exact startup container identity and full-replacement offsets.
+- **T3 reliability:** Serialised the fetch/update refresh path with `isUpdating`, wrapped startup and text bridge calls in a five-second `Promise.race` timeout, retained the last good board on failures, and attempts to append a stale-age marker. Invalid/non-array/no-usable-status responses are treated as failures.
+- **T3 blocker / question for the lead:** The task's quoted `bridge.textContainerUpgrade({ ... })` call does not type-check against the installed `@evenrealities/even_hub_sdk@0.0.12`. TypeScript reports `TS2345`: the object is not assignable to `TextContainerUpgrade` because required property `toJson` is missing. Please provide the exact documented import/construction form for `TextContainerUpgrade` (or confirm that a specific type workaround is hardware-verified). I did not guess a constructor or suppress the error.
+- **Decision beyond the spec:** Until event subscription details are supplied, the refresh interval cannot pause in background or refresh specifically on foreground entry. It starts once after startup and continues every 60 seconds.
+- **Verification:** `npm run build` was run and currently fails at `src/main.ts:130` with the `TS2345` SDK-contract mismatch above; Vite therefore did not run. Grep found exactly one source call to `createStartUpPageContainer`, only `textContainerUpgrade` in the refresh path, an explicit `isUpdating` overlap guard, no `rebuildPageContainer`, no event-field reads, and no occurrence of `window.localStorage`, `localStorage.`, `indexedDB`, `TFL_APP_KEY`, or `VITE_` in `src/`. `git diff --check` passed. The glasses simulator, double-tap exit dialog, foreground/background behaviour, network-off recovery, and comparison against the live TfL status page could not be verified while the build is blocked.
+- **Surprises:** None beyond the missing SDK event-subscription contract described above. No storage API or client-side TfL key/environment variable was added.
+
+**2026-07-28 — Round 2: T3b, T2b, T3c**
+
+- **T3b:** Imported `TextContainerUpgrade` and changed the status update to pass `new TextContainerUpgrade({ ... })` with the existing exact container identity and full-replacement offsets. Added the review-requested guard so a nonzero startup result logs an error and does not subscribe or start refresh work. `npm run build` passed immediately after this task.
+- **T2b:** Subscribed with `bridge.onEvenHubEvent`, checking `textEvent` before `sysEvent`. Both `eventType` reads use `?? 0`. Swipe up/down and single tap log; double tap calls `shutDownPageContainer(1)` without cleanup; foreground exit clears and logs the paused interval; foreground enter logs, triggers an immediate refresh, and resumes the interval without duplicating it; abnormal/system exit pause the interval and call the returned `unsubscribe`. `npm run build` passed after this task.
+- **T3c:** Added module-level `bridgeCallPending`. `updateStatusContainer` assigns the raw `textContainerUpgrade` promise to that gate, attaches cleanup to the raw promise's true settlement, and races that same raw promise only for the caller's five-second wait. While the raw promise remains unsettled, later status sends are skipped with the distinct log `Skipping status update while the previous raw bridge call is still pending`. A skipped send returns `false`, so it is not incorrectly recorded as the latest successfully displayed board.
+- **Decisions beyond the spec:** Applied the same raw-promise pending principle to repeated exit-dialog requests so a timed-out `shutDownPageContainer` call cannot be duplicated while its raw call remains unresolved. Exit-dialog failure/timeout is logged.
+- **Verification:** Final `npm run build` passed (TypeScript and Vite). Grep confirmed one source call to `createStartUpPageContainer`, no `rebuildPageContainer`, only `textContainerUpgrade` in the refresh path, both `eventType` reads using `?? 0`, the raw-promise bridge gate, and no forbidden browser storage, `TFL_APP_KEY`, or `VITE_` occurrence in `src/`. `git diff --check` passed before the final notes append.
+- **Could not verify / question for the lead:** The local Vite server launched successfully after permission was granted, but the plan's simulator command `npx evenhub-simulator http://127.0.0.1:5173` failed with npm `E404` because it tried to download the nonexistent unscoped package `evenhub-simulator`. The installed scoped simulator package exposes only an `evenhub` binary. Please provide the verified simulator CLI invocation/subcommand. Therefore the visual two-container render, live TfL comparison, gesture/exit-dialog behaviour, lifecycle events, and network-off recovery remain unverified in the simulator this round.
+- **Surprises:** The supplied simulator command does not resolve to the installed scoped package's binary; no SDK behaviour was inferred to work around it. No location API, proxy, milestone 2 work, client key, or Vite-prefixed environment variable was touched.
+
 ---
 
 ## Review
 
 **2026-07-28:** Nothing of Sol's to review yet. Plan for milestone 1 written; T1 (scaffold) done by the lead and verified building clean, so Sol's first run starts at T2. Review will check acceptance criteria first, then the platform gotchas: proto3 zero-value elision (`?? 0` on all event fields), one in-flight bridge update at a time, bridge KV storage only, no browser localStorage, exactly one `isEventCapture: 1` container, cleanup ordering around the exit dialog.
+
+**2026-07-28 — Review of round 1 (T2 partial, T3).** Overall: a genuinely good first run. Both blockers Sol raised were legitimate spec gaps on my side, and stopping to ask instead of inventing SDK code was exactly the right call. Both are now answered with verified contracts in the Plan (T2b, T3b).
+
+What I checked and confirmed:
+
+- **T2 layout (src/main.ts:26-52):** matches the spec field for field. Container IDs, names, geometry, padding, exactly one `isEventCapture: 1`. Pass.
+- **T3 structure:** exported `API_BASE` constant, correct endpoint, 13-char name padding, 475-char budget with truncation logging, guarded 60s interval, immediate first refresh, full-replacement offsets, last-good-board retention with stale marker, and the refresh path uses only `textContainerUpgrade`. All match the spec. The timeout wrapper (src/main.ts:54-69) correctly clears its timer to avoid stray timeouts; nice touch.
+- **Gotcha sweep:** no browser storage, no `rebuildPageContainer`, no `TFL_APP_KEY` or `VITE_` in client code, single `createStartUpPageContainer` call. All clean. No event-field reads exist yet so elision cannot be judged this round; it is baked into T2b's criteria.
+- **Build failure at src/main.ts:130 (TS2345):** reproduced the cause in the SDK typings. Sol's diagnosis was correct: `TextContainerUpgrade` is a class and the method wants an instance. The plan's object-literal example was my error. Fix specced in T3b.
+
+Corrections (specific):
+
+1. **src/main.ts:130** — wrap the argument in `new TextContainerUpgrade({ ... })` and add the import. Full contract in T3b. This unblocks the build, and with it the simulator criteria that could not be verified this round.
+2. **src/main.ts:54-69 with 141-178** — in-flight gap: a timed-out bridge call is still pending, but `finally` releases `isUpdating`, so the next tick can send a concurrent bridge call, which risks crashing the BLE link. Fix specced in T3c (gate on the raw promise, not the raced one). This one is on me as much as Sol; round 1 said "timeout and skip the tick" without saying what gates the next send.
+3. **Minor, src/main.ts:71-80 and 181-184** — the refresh loop starts even if `createStartUpPageContainer` returned nonzero. If startup failed there is nothing to update; guard it (skip starting the loop and log an error). Fold into T3b, no separate criteria.
+4. **Note, no action:** the stale marker can push content to roughly 495 chars, slightly past the 475 budget. Well inside the 2000 hard limit and at worst the last line clips; acceptable.
+
+Not verifiable this round (build was red): simulator render, exit dialog, network-off recovery, live status comparison. These carry forward as T2b/T3b criteria.
+
+**Verdict: corrections issued, no sign-off yet.** Sol's next run is T3b, T2b, then T3c, in that order (build first, then features, then hardening). Not committing round 1 to main; the commit lands when the round goes green.
+
+**2026-07-28 — Review of round 2 (T3b, T2b, T3c). SIGNED OFF.** Milestone 1 is complete. The lead ran the app in the simulator and verified everything Sol could not.
+
+Code review findings:
+
+- **T3b:** `new TextContainerUpgrade({...})` with the import, plus the nonzero-startup guard (src/main.ts:240-276 restructured so events and refresh only start when `result === 0`). Correct.
+- **T2b:** event wiring matches the contract exactly: `textEvent` checked before `sysEvent`, both `eventType` reads use `?? 0`, double tap defers cleanup, foreground enter/exit pause and resume without duplicating the interval (the `refreshInterval !== undefined` guard in `startRefreshInterval` is right), cleanup lives in the 6/7 handlers. Correct.
+- **T3c:** the raw-promise gate is exactly as specced: `bridgeCallPending` holds the raw bridge promise, cleanup attaches to its true settlement, the race only governs the caller's wait, skipped sends log distinctly and return `false` so a skipped board is not recorded as displayed (src/main.ts:132-154, 176-179). Correct. Extending the same principle to `requestExit` was a sensible unrequested improvement; accepted.
+
+Simulator verification by the lead (Sol's blocker resolved):
+
+- **Root cause of the E404:** the `node_modules/.bin/evenhub-simulator` symlink was never created. The scaffold's first `npm install` aborted mid-flight on the TypeScript peer conflict, leaving the simulator package installed but unlinked. That was the lead's broken install, not a wrong command and not Sol's error. Fixed with `npm rebuild @evenrealities/evenhub-simulator`. The verified invocation, from repo root: `npx evenhub-simulator http://localhost:<port> --automation-port 9898`.
+- Verified in the simulator: real TfL board renders (alphabetical, 17 of 19 lines within budget, truncation logged), footer hint renders, `createStartUpPageContainer result: 0`, swipe up logs, single tap logs, double tap logs `Calling shutDownPageContainer(1)`.
+- **Elision proof in the wild:** the simulator's single-tap event arrived with NO `eventType` field at all (`{"sysEvent":{"eventSource":1}}`), and the `?? 0` handling classified it correctly. The gotcha is real and the code survives it.
+- **Simulator quirks (recorded for future rounds, no code changes needed):** swipe-down events are sometimes swallowed by the simulator's native text scroll; the exit dialog is not rendered visually (the page just blanks); `SYSTEM_EXIT_EVENT` (7) is never delivered, so the cleanup path cannot be observed in the simulator (verified correct by inspection); the simulator fast-forwards timers, so the 60s refresh ticks far more often than on hardware. All four need on-hardware confirmation eventually, none block sign-off.
+- Not verified this round: network-off stale marker behaviour (code path reviewed and sound; will surface naturally in hardware testing).
+
+**Milestone 1 is done.** T2, T3, T3b, T2b, T3c all pass. Committing this round to main. Next: milestone 2 planning (phone-side planning UI, proxy, journey fetch). Per Jack's direction, the product is a route planner that does the work for you: disruption information is only mentioned when it affects the user's route, so no dedicated status/disruption screens get planned. The milestone 1 status board stays as a walking-skeleton artefact and will be replaced, not extended.
 
 ---
 
