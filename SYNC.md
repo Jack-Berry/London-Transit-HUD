@@ -674,6 +674,16 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** This is the third swing; the criteria above simulate the hostile container rather than a friendly browser, and the pointerdown change must not break desktop mouse or keyboard access.
 
+**2026-07-28 — Review of round H (T15). SIGNED OFF, one small required correction (T15b).** Lead ran the hostile matrix in a 390x300 container, everything structural passes:
+
+- Takeover engages on focus with the input 22px from the top; the top three (in fact five) options visible inside 300px; the suggestion list owns the remaining height with internal scroll.
+- **The race test passes:** `pointerdown` on an option followed by the click completing 80px away still selects correctly and closes the list as selected, not dismissed. This was the mirror-exposed bug and it is dead.
+- After selection, takeover exits and the To field is visible with zero scrolling. Cancel (correctly targeted per-field) restores the full form. Datetime focus never triggers takeover and receives the 45vh headroom. Full flow at 390x660 and desktop unaffected; no page errors. (The lead's first run flagged Cancel/datetime failures: both were test-harness targeting faults, corrected and re-verified passing.)
+
+#### T15b — Name gets priority in takeover suggestion rows (required before upload)
+
+The 300px screenshot shows the top result's name crushed to a single letter by its four mode chips sharing the row. Fix in the takeover compact-row CSS: the `.suggestion-name` gets priority (e.g. `flex: 1 1 auto; min-width: 60%;` with ellipsis truncation) and the chip list truncates or caps at two chips (`overflow: hidden`) in `search-active` mode. Acceptance: at 390x300, the top result for "kings" shows a readable name (at least "King's Cross & St Pan..." scale) with chips fitting in the remainder; normal-mode rows unchanged. Effort: **light**, CSS only.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
@@ -872,6 +882,15 @@ Jack likes the phone app's polish but it is not his vibe. A visual revision roun
 - **Manifest:** Bumped `app.json` to `0.1.2`.
 - **Verification:** Root and proxy builds pass; `git diff --check` and standing safety greps pass. CSS/source checks confirm body scroll is locked, `.app-shell` owns vertical scrolling with the `dvh` enhancement, suggestions remain absolute and internally scrollable, no To auto-focus exists, one startup call remains, both event reads use `?? 0`, and production contains neither development hook nor forbidden key/storage/origin usage.
 - **Could not verify / lead action:** The browser-control surface again reported no available browser, so I could not honestly run the required Playwright bounding-box, z-order screenshot, bottom-option click, 390x350/390x660 full-flow, or desktop visual checks. The lead should run that matrix before re-upload, followed by Jack's iOS hardware retest. No SDK code or glasses layout changed, no SDK documentation was consulted, and there are no questions for the lead. No deployment, commit, or push was performed; the pre-existing `.claude/settings.json` change remains untouched.
+
+**2026-07-28 — T15 search takeover and first-contact selection**
+
+- **First-contact selection:** Centralised stop and place option activation in one helper. `pointerdown` now calls `preventDefault()` and selects immediately; the retained `click` handler is the keyboard/assistive fallback and becomes a no-op after pointer selection because the exact selection object is already active. There is no remaining suggestion option with a click-only selection path.
+- **Search takeover:** Focusing either station input adds `search-active` to the app shell, moves that field flush to the top, hides the compact header, inactive station field, timing controls, datetime field, plan button, results, and footer, then gives the suggestion list the remaining shell height as its own scroll area. Selection, an outside pointer, or the new adjacent Cancel button exits takeover and restores the complete form. Exiting scrolls the active field to the shell top so the other station field is visible without a manual recovery scroll.
+- **Sizing and keyboard headroom:** Suggestion height is the floored minimum of VisualViewport-derived space and `shell.clientHeight - listTop - 12`, with the existing 120px floor. The active field tracks the shell's measured client height across viewport changes. Any focused form input adds `45vh` bottom headroom; datetime focus receives only that headroom and never activates search takeover.
+- **Decisions and robustness:** Compact takeover rows keep mode chips on one clipped line so the first three results retain predictable vertical space in the hostile short viewport. Leaving takeover cancels the debounce or active fetch as well as hiding results, preventing a late response from reopening the list. Cancel handles pointerdown without surrendering input focus before its click activation, then performs the same single exit path.
+- **Manifest and verification:** Bumped `app.json` to `0.1.3`. Root and proxy builds pass; `git diff --check` and standing safety greps pass. Source inspection confirms pointerdown precedes the guarded click fallback, one startup call remains, both event reads use `?? 0`, and production contains neither development hooks nor forbidden key, storage, `VITE_`, or direct TfL-origin usage.
+- **Could not verify / lead action:** The browser-control surface reported no available browser, so I could not honestly run the required Playwright 390x300 geometry, visible-top-three, displaced pointerdown/click, Cancel recovery, 390x660 full-flow, datetime-focus, or desktop checks. The lead should run that acceptance matrix and the subsequent embedded iOS retest. No SDK code or glasses layout changed, no SDK documentation was consulted, and there are no questions for the lead. No deployment, commit, or push was performed; the pre-existing `.claude/settings.json` change remains untouched.
 
 ---
 

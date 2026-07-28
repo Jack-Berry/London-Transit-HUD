@@ -97,13 +97,17 @@ interface JourneyResponse {
 }
 
 interface StationControl {
+  field: HTMLElement
   input: HTMLInputElement
   suggestions: HTMLElement
   error: HTMLElement
+  cancel: HTMLButtonElement
+  shell: HTMLElement
   selected?: JourneySelection
   debounce?: ReturnType<typeof setTimeout>
   abortController?: AbortController
   hasScrolledForSuggestions: boolean
+  onSelection: () => void
   stopViewportTracking?: () => void
 }
 
@@ -126,9 +130,11 @@ export function initializePhoneUi(
   onJourneySelected: (journey: Journey) => void,
 ): void {
   journeySelectionHandler = onJourneySelected
+  const appShell = getElement<HTMLElement>('app-shell')
   const form = getElement<HTMLFormElement>('journey-form')
-  const fromControl = createStationControl('from')
-  const toControl = createStationControl('to')
+  const fromControl = createStationControl('from', appShell)
+  const toControl = createStationControl('to', appShell)
+  const stationControls = [fromControl, toControl]
   const datetimeField = getElement<HTMLElement>('datetime-field')
   const datetimeInput = getElement<HTMLInputElement>('journey-datetime')
   const plannerError = getElement<HTMLElement>('planner-error')
@@ -142,8 +148,84 @@ export function initializePhoneUi(
   datetimeInput.min = toDatetimeLocalValue(new Date(now()))
   datetimeInput.value = toDatetimeLocalValue(nextHalfHour())
 
-  bindStationSearch(fromControl, apiBase)
-  bindStationSearch(toControl, apiBase)
+  let activeSearchControl: StationControl | undefined
+
+  const enterSearchTakeover = (control: StationControl): void => {
+    if (activeSearchControl !== undefined && activeSearchControl !== control) {
+      cancelStationSearch(activeSearchControl)
+      hideSuggestions(activeSearchControl)
+      activeSearchControl.field.classList.remove('is-search-active')
+      activeSearchControl.field.style.removeProperty('--search-shell-height')
+    }
+
+    activeSearchControl = control
+    appShell.classList.add('search-active', 'input-focused')
+    control.field.classList.add('is-search-active')
+    control.field.style.setProperty(
+      '--search-shell-height',
+      `${appShell.clientHeight}px`,
+    )
+    appShell.scrollTop = 0
+  }
+
+  const exitSearchTakeover = (control: StationControl): void => {
+    if (activeSearchControl !== control) {
+      return
+    }
+
+    cancelStationSearch(control)
+    hideSuggestions(control)
+
+    const focusedElement = document.activeElement
+    if (
+      focusedElement instanceof HTMLElement
+      && control.field.contains(focusedElement)
+    ) {
+      focusedElement.blur()
+    }
+
+    control.field.classList.remove('is-search-active')
+    control.field.style.removeProperty('--search-shell-height')
+    appShell.classList.remove('search-active', 'input-focused')
+    activeSearchControl = undefined
+    control.field.scrollIntoView({ block: 'start', behavior: 'auto' })
+  }
+
+  for (const control of stationControls) {
+    control.onSelection = () => exitSearchTakeover(control)
+    control.cancel.addEventListener('pointerdown', event => {
+      event.preventDefault()
+    })
+    control.cancel.addEventListener('click', () => {
+      exitSearchTakeover(control)
+    })
+    bindStationSearch(
+      control,
+      apiBase,
+      () => enterSearchTakeover(control),
+    )
+  }
+
+  form.addEventListener('focusin', event => {
+    if (event.target instanceof HTMLInputElement) {
+      appShell.classList.add('input-focused')
+    }
+  })
+
+  form.addEventListener('focusout', () => {
+    requestAnimationFrame(() => {
+      const focusedElement = document.activeElement
+      if (
+        !appShell.classList.contains('search-active')
+        && !(
+          focusedElement instanceof HTMLInputElement
+          && form.contains(focusedElement)
+        )
+      ) {
+        appShell.classList.remove('input-focused')
+      }
+    })
+  })
 
   for (const timingInput of timingInputs) {
     timingInput.addEventListener('change', () => {
@@ -158,6 +240,13 @@ export function initializePhoneUi(
     const target = event.target
     if (!(target instanceof Node)) {
       return
+    }
+
+    if (
+      activeSearchControl !== undefined
+      && !activeSearchControl.field.contains(target)
+    ) {
+      exitSearchTakeover(activeSearchControl)
     }
 
     if (!fromControl.suggestions.contains(target) && target !== fromControl.input) {
@@ -192,17 +281,35 @@ function getElement<T extends HTMLElement>(id: string): T {
   return element as T
 }
 
-function createStationControl(prefix: 'from' | 'to'): StationControl {
+function createStationControl(
+  prefix: 'from' | 'to',
+  shell: HTMLElement,
+): StationControl {
+  const input = getElement<HTMLInputElement>(`${prefix}-input`)
+  const field = input.closest<HTMLElement>('.station-field')
+  if (field === null) {
+    throw new Error(`Missing station field for ${prefix}`)
+  }
+
   return {
-    input: getElement<HTMLInputElement>(`${prefix}-input`),
+    field,
+    input,
     suggestions: getElement<HTMLElement>(`${prefix}-suggestions`),
     error: getElement<HTMLElement>(`${prefix}-error`),
+    cancel: getElement<HTMLButtonElement>(`${prefix}-search-cancel`),
+    shell,
     hasScrolledForSuggestions: false,
+    onSelection: () => undefined,
   }
 }
 
-function bindStationSearch(control: StationControl, apiBase: string): void {
+function bindStationSearch(
+  control: StationControl,
+  apiBase: string,
+  onFocus: () => void,
+): void {
   control.input.addEventListener('focus', () => {
+    onFocus()
     control.hasScrolledForSuggestions = false
     scheduleStationFieldScroll(control)
   })
@@ -226,9 +333,19 @@ function bindStationSearch(control: StationControl, apiBase: string): void {
 
     control.input.parentElement?.classList.add('is-loading')
     control.debounce = setTimeout(() => {
+      control.debounce = undefined
       void searchDestinations(control, query, apiBase)
     }, SEARCH_DEBOUNCE_MS)
   })
+}
+
+function cancelStationSearch(control: StationControl): void {
+  if (control.debounce !== undefined) {
+    clearTimeout(control.debounce)
+    control.debounce = undefined
+  }
+  control.abortController?.abort()
+  control.input.parentElement?.classList.remove('is-loading')
 }
 
 async function searchDestinations(
@@ -419,13 +536,11 @@ function createStopOption(control: StationControl, match: StationMatch): HTMLEle
   }
 
   option.append(name, chips)
-  option.addEventListener('click', () => {
-    selectDestination(control, {
-      kind: 'stop',
-      name: match.name,
-      endpoint: match.icsId,
-      match,
-    })
+  bindSuggestionSelection(option, control, {
+    kind: 'stop',
+    name: match.name,
+    endpoint: match.icsId,
+    match,
   })
   return option
 }
@@ -454,15 +569,29 @@ function createPlaceOption(control: StationControl, place: PlaceMatch): HTMLElem
 
   copy.append(name, secondary)
   option.append(copy, type)
-  option.addEventListener('click', () => {
-    selectDestination(control, {
-      kind: 'place',
-      name: place.name,
-      endpoint: `${place.lat},${place.lon}`,
-      place,
-    })
+  bindSuggestionSelection(option, control, {
+    kind: 'place',
+    name: place.name,
+    endpoint: `${place.lat},${place.lon}`,
+    place,
   })
   return option
+}
+
+function bindSuggestionSelection(
+  option: HTMLButtonElement,
+  control: StationControl,
+  selection: JourneySelection,
+): void {
+  option.addEventListener('pointerdown', event => {
+    event.preventDefault()
+    selectDestination(control, selection)
+  })
+  option.addEventListener('click', () => {
+    if (control.selected !== selection) {
+      selectDestination(control, selection)
+    }
+  })
 }
 
 function selectDestination(control: StationControl, selection: JourneySelection): void {
@@ -472,6 +601,7 @@ function selectDestination(control: StationControl, selection: JourneySelection)
   control.input.setAttribute('aria-invalid', 'false')
   control.error.textContent = ''
   hideSuggestions(control)
+  control.onSelection()
 }
 
 function hideSuggestions(control: StationControl): void {
@@ -499,27 +629,34 @@ function startSuggestionViewportTracking(control: StationControl): void {
   control.stopViewportTracking?.()
 
   const visualViewport = window.visualViewport
-  if (visualViewport === undefined || visualViewport === null) {
-    control.suggestions.style.maxHeight = '40vh'
-    control.stopViewportTracking = undefined
-    return
-  }
-
   const updateMaxHeight = (): void => {
+    if (control.field.classList.contains('is-search-active')) {
+      control.field.style.setProperty(
+        '--search-shell-height',
+        `${control.shell.clientHeight}px`,
+      )
+    }
+
     const listTop = control.suggestions.getBoundingClientRect().top
+    const visualViewportHeight = visualViewport?.height
+      ?? window.innerHeight * 0.4
+    const viewportAvailableHeight = visualViewportHeight - listTop - 12
+    const shellAvailableHeight = control.shell.clientHeight - listTop - 12
     const availableHeight = Math.max(
       120,
-      Math.floor(visualViewport.height - listTop - 12),
+      Math.floor(Math.min(viewportAvailableHeight, shellAvailableHeight)),
     )
     control.suggestions.style.maxHeight = `${availableHeight}px`
   }
 
   updateMaxHeight()
-  visualViewport.addEventListener('resize', updateMaxHeight)
-  visualViewport.addEventListener('scroll', updateMaxHeight)
+  visualViewport?.addEventListener('resize', updateMaxHeight)
+  visualViewport?.addEventListener('scroll', updateMaxHeight)
+  window.addEventListener('resize', updateMaxHeight)
   control.stopViewportTracking = () => {
-    visualViewport.removeEventListener('resize', updateMaxHeight)
-    visualViewport.removeEventListener('scroll', updateMaxHeight)
+    visualViewport?.removeEventListener('resize', updateMaxHeight)
+    visualViewport?.removeEventListener('scroll', updateMaxHeight)
+    window.removeEventListener('resize', updateMaxHeight)
   }
 }
 

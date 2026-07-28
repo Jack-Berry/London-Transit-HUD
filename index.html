@@ -14,7 +14,7 @@
     <title>London Transit HUD</title>
   </head>
   <body>
-    <main class="app-shell">
+    <main id="app-shell" class="app-shell">
       <header class="hero">
         <div class="brand-mark" aria-hidden="true">
           <span></span>
@@ -47,18 +47,27 @@
             <div class="field-stack">
               <div class="station-field">
                 <label for="from-input">From</label>
-                <div class="input-shell">
-                  <input
-                    id="from-input"
-                    type="search"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="Search station, bar or venue"
-                    aria-autocomplete="list"
-                    aria-controls="from-suggestions"
-                    aria-expanded="false"
-                  />
-                  <span class="input-state" aria-hidden="true"></span>
+                <div class="station-input-row">
+                  <div class="input-shell">
+                    <input
+                      id="from-input"
+                      type="search"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Search station, bar or venue"
+                      aria-autocomplete="list"
+                      aria-controls="from-suggestions"
+                      aria-expanded="false"
+                    />
+                    <span class="input-state" aria-hidden="true"></span>
+                  </div>
+                  <button
+                    id="from-search-cancel"
+                    class="search-cancel"
+                    type="button"
+                  >
+                    Cancel
+                  </button>
                 </div>
                 <div
                   id="from-suggestions"
@@ -72,18 +81,27 @@
 
               <div class="station-field">
                 <label for="to-input">To</label>
-                <div class="input-shell">
-                  <input
-                    id="to-input"
-                    type="search"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="Search station, bar or venue"
-                    aria-autocomplete="list"
-                    aria-controls="to-suggestions"
-                    aria-expanded="false"
-                  />
-                  <span class="input-state" aria-hidden="true"></span>
+                <div class="station-input-row">
+                  <div class="input-shell">
+                    <input
+                      id="to-input"
+                      type="search"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Search station, bar or venue"
+                      aria-autocomplete="list"
+                      aria-controls="to-suggestions"
+                      aria-expanded="false"
+                    />
+                    <span class="input-state" aria-hidden="true"></span>
+                  </div>
+                  <button
+                    id="to-search-cancel"
+                    class="search-cancel"
+                    type="button"
+                  >
+                    Cancel
+                  </button>
                 </div>
                 <div
                   id="to-suggestions"

@@ -86,7 +86,8 @@
       "Bash(curl -s --max-time 1 http://127.0.0.1:9899/api/ping)",
       "Bash(rsync -az dist/app.json deploy@car-proxy.berrydev.co.uk:~/london-transit-hud-site/app.json)",
       "Bash(unzip -l london-transit-hud.ehpk)",
-      "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('packed version:', d['version'], '| package_id:', d['package_id']\\)\")"
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('packed version:', d['version'], '| package_id:', d['package_id']\\)\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('version:', d['version'], '|', d['package_id']\\)\")"
     ]
   }
 }
