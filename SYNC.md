@@ -389,6 +389,66 @@ Acceptance criteria: `npm run build` passes; in a plain browser, typing "french 
 
 Effort recommendation for Jack: **medium.** The pattern is established from round B; T8 is mechanical and T9 extends existing components.
 
+### 2026-07-28 — Milestone 3 round D: the glasses handoff (T10)
+
+Journey mode on the glasses: Go on the phone switches the glasses from the status board to swipeable stage pages. Live position comes in round E; this round the pages are static.
+
+**Verified API facts for this round (lead-checked through the live proxy):**
+
+- Transport legs carry `routeOptions[0].name` (e.g. `Victoria`), `instruction.summary` (e.g. `Victoria line to Brixton`), ISO `departureTime` / `arrivalTime`, `duration` (minutes), `isDisrupted` and `disruptions[]`.
+- `leg.path.stopPoints[]` is `{id, name}` per stop, in order, **starting from the first stop after boarding** (the departure station is not included) and ending at the leg's arrival stop.
+- Walking legs have `instruction.summary`, `duration`, and `arrivalPoint.commonName`.
+- The journey object held by the phone's Go selection is plain JSON, safe to snapshot.
+
+**Platform facts for this round (hardware-verified from project docs; the usual rule applies, do not improvise):**
+
+1. **Backgrounding reloads the app.** When the phone goes to background, the Even host snapshots JS state, loads the SAME plugin URL in a fresh headless WebView, replays the snapshot, and keeps driving the glasses from there; on foregrounding it migrates back. If we register no state hooks, the snapshot is `{}` and the app RESETS mid-journey. The API, verbatim from `@evenrealities/even_hub_sdk`:
+
+```typescript
+import { setBackgroundState, onBackgroundRestore } from '@evenrealities/even_hub_sdk'
+setBackgroundState('journeyMode', () => ({ ...journeyState }))   // exporter: MUST return a snapshot copy of plain JSON (spread it), never the live reference
+onBackgroundRestore('journeyMode', saved => {
+  const s = saved as typeof journeyState
+  journeyState = { ...journeyState, ...s }                        // restorer: MUST reassign the live variable, with ?? fallbacks per field
+})
+```
+
+Rules: same key string in both calls; both registered at module init time (top level, before `onEvenHubEvent`), never inside a handler or conditional; no Dates, Maps, Sets or class instances in the snapshot. Because init re-runs in the headless WebView, the restore callback may fire before OR after our async glasses init reaches its first render: handle both orders (see T10 spec).
+
+2. **Text measurement.** Install `@evenrealities/pretext` (client dependency; it is a plain measurement library mirroring the glasses firmware renderer). API: `getTextWidth(text): number` (single-line px), `measureTextWrap(text, maxWidth): {lineCount, height, lineWidths}`, `pxTruncate(text, maxPx): string` (appends `...`). Line height is fixed **27px**. Padding maths: text area inside a container is `width - 2*(paddingLength + borderWidth)` (same for height). Never guess pixel sizes; measure.
+3. **Glyphs for the route bar, measured by the lead against firmware metrics:** `●` `○` `─` `▼` `▲` `■` `□` `◆` `◇` are all exactly **20px** wide; `→` is 17px; space is 5px. **Do NOT use `◉`, `▸` or `▾`**: they measure 4px, which means the firmware lacks the glyph and will render tofu.
+4. Page changes use `rebuildPageContainer` (full redraw, brief flicker, fine for page turns). The in-place `textContainerUpgrade` path stays for round E's live updates. All previous container rules hold: max 12 containers, exactly one `isEventCapture: 1`, `containerName` max 16 chars, IDs unique per page.
+
+---
+
+#### T10 — Journey mode: handoff, stage pages, swipe navigation, background persistence
+
+**State model.** A module-level journey state, e.g. `{ active: boolean, journey: Journey | null, stageIndex: number }`. Go on the phone sets it and triggers the glasses switch (same JS context, plain function call between modules). Register the background hooks for it at module init exactly as quoted above. Restore-order rule: if the restore callback fires after the glasses already rendered the status board, and the restored state says a journey is active, rebuild into the current stage; if it fires first, the glasses init must check the state and render the journey stage instead of the status board.
+
+**Stages.** Derive one stage per leg of the selected journey, in order. Walking leg stage: type walk. Transport leg stage: type ride. If the LAST leg is not a walking leg, append a final synthetic stage: type arrive, text `Walk to your destination`. Do not prepend anything before the first leg.
+
+**Page layouts (576x288, reuse the existing footer container pattern):**
+
+- Ride stage, three text containers: header at `y:0 h:54` (two lines: `instruction.summary` pxTruncated to fit, then `Stage N of M · <duration> min`); body at `y:54 h:198` for the route bar block; footer at `y:252 h:36` with `Swipe: stages   2x tap: exit`. Body content, three lines, all left-aligned (there is no alignment control):
+  1. `<departure name> → <arrival name>`: pxTruncate each name to roughly 240px so the line fits 568px inner width.
+  2. The bar: `●` then `─○` per intermediate stop then `─●`. Every bar glyph is 20px, so width = `(2*stops + 1) * 20` for `stops` intermediate stops plus the two ends. If that exceeds the inner width, thin it: drop every second `○` (keeping the `─` runs) until it fits. The bar must never wrap: verify with `getTextWidth` before rendering.
+  3. `<stopPoints.length> stops · arrive <HH:MM from leg.arrivalTime>`.
+- Walk stage: header `Walk`; body: `instruction.summary` if present else `Walk to <arrivalPoint.commonName>`, plus `about <duration> min`; same footer.
+- Arrive stage: body `Walk to your destination`; same footer.
+
+**Input in journey mode:** swipe up = next stage, swipe down = previous, clamped at both ends (a swipe past the end does nothing). Each stage change is one `rebuildPageContainer` call, serialised through the existing raw-promise gate (extend the gate to cover rebuilds: one bridge call in flight, ever). Double tap keeps the existing exit-dialog behaviour unchanged. Foreground enter re-renders the CURRENT stage when a journey is active (not the status board). The status board refresh interval is paused for the whole time a journey is active.
+
+**Dev hook for verification (this round only, keep it small):** support a `?dev-journey=<from>/<to>` URL query (values are icsIds or `lat,long`), active only when `import.meta.env.DEV` is true, which on load auto-plans that journey and enters journey mode with the first result. This exists so the lead can drive the glasses side in the simulator, where the phone UI cannot be clicked by automation. It must be dead code in production builds.
+
+Acceptance criteria:
+
+- Root and proxy builds pass; all standing grep checks stay clean; `setBackgroundState`/`onBackgroundRestore` registered top-level with matching keys, spread snapshot, `??` restores.
+- Plain browser: planning and pressing Go logs the handoff and does not error (bridge-dead path stays silent beyond the info log).
+- Simulator with `?dev-journey=1000129/1000031`: glasses show the first stage page; swiping up walks through every stage to the arrive page and clamps; swiping down returns and clamps; each ride page shows header, names line, bar, and stops/arrival line with no scrollbar on the body container (bar measured, not guessed); double tap still raises the exit dialog.
+- Console evidence that the status refresh is paused while the journey is active and that stage changes go through the serialised bridge gate.
+
+Effort recommendation for Jack: **high.** State machine, restore-order handling and firmware-constrained layout in one round.
+
 ---
 
 ---
