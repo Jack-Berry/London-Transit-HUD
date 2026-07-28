@@ -652,6 +652,12 @@ Effort recommendation for Jack: **high.** Layout restructure with platform-behav
 - Compact header landed; hero copy deleted. Version 0.1.2. Hosted copy redeployed.
 - Recommended pre-upload check for Jack: open transit.berrydev.co.uk in phone Safari and run one search: closest available cousin to the Even WKWebView before committing another upload cycle.
 
+### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
+
+- **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
+- Consider bumping to `1.0.0` for the public listing (store precedent: Genesis Remote launched at 1.0.0).
+- Re-run the packaging validation against the final manifest before the public upload.
+
 ### 2026-07-28 — Queued, not yet tasked: glasses HUD element customisation (Jack's idea, 2026-07-28)
 
 Let the user toggle individual HUD elements on the glasses (arrival time, stage counter, stop count, names line) from a phone-side settings section. Good product feature; not tasked yet, and explicitly NOT the fix for the scroll bug (the unreachable To field already existed below the fold; the WebView was refusing page scroll regardless of content quantity). Revisit after the restyle round.
