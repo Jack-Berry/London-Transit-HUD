@@ -462,6 +462,7 @@ T5 (deploy) proceeds now.
 - Added the `transit.berrydev.co.uk` site block to the shared Caddyfile, `caddy validate` passed, reloaded without downtime for the other apps.
 - End-to-end verified over HTTPS from outside: `/healthz` 200 with CORS, live tube status through the proxy (11 lines), non-allowlisted path 404. Fresh Let's Encrypt cert issued automatically.
 - The Caddyfile change is **committed on the droplet's connect-remote checkout but not pushed** (the droplet has no GitHub credentials). Jack: push it from the droplet next time you have credentials there, or tell me and I will sort a deploy key. Until then a `git pull` on the droplet will merge fine; nothing is at risk.
+- **Addendum, later on 2026-07-28:** Jack made the repo public, so the lead replaced the rsynced directory on the droplet with a proper git clone (same path, `.env` preserved, container untouched, verified healthy after). Standard deploy from now on: ssh in, `git pull`, `docker compose up -d --build` in `~/london-transit-hud/proxy`.
 - Also verified through the live proxy while testing: hub ids (`HUBKGX`) are NOT valid journey locations. TfL treats them as free text and returns HTTP 300 with a list of fuzzy matches (highlight: "Chicken Hub" in Hackney). Search matches carry `icsId` (e.g. `1000129` for King's Cross), and journeys planned with `icsId` values return 200 with journeys and fares. Round B uses `icsId` exclusively.
 
 ---
