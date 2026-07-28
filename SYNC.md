@@ -313,7 +313,47 @@ DNS record for the chosen subdomain, site block in the shared Caddyfile, `.env` 
 
 ---
 
-**Round B preview (phone-side planning UI, tasked after round A):** station search box hitting `/tfl/StopPoint/Search/{query}?modes=tube,elizabeth-line,dlr,overground,bus` (verified live: returns `matches[]` with `id`, `name`, `modes[]`; hub ids like `HUBKGX` work directly as journey endpoints), from/to selection, now/later/arrive-by, fastest and cheapest cards with per-mode identifiers, and a Go button that hands over to the glasses.
+**Round B preview:** superseded by the full round B plan below. One correction to an earlier claim: hub ids do NOT work as journey endpoints (verified: TfL treats them as free text and answers HTTP 300); use `icsId` from search matches instead.
+
+### 2026-07-28 — Milestone 2 round B: client through the proxy, then the phone planning UI
+
+The proxy is live at `https://transit.berrydev.co.uk` (T5 done, see Review). This round is one mechanical task and one design-heavy task.
+
+---
+
+#### T6 — Point the client at the proxy, fix the Dockerfile CMD
+
+1. `src/main.ts:8`: change `API_BASE` from `'https://api.tfl.gov.uk'` to `'https://transit.berrydev.co.uk/tfl'`. Nothing else changes; the proxy mirrors TfL paths under `/tfl/`.
+2. `proxy/Dockerfile` last line: `CMD ["npm", "start"]` becomes `CMD ["node", "dist/server.js"]` (npm does not reliably forward SIGTERM; this is the carry-forward correction from the T4 review).
+
+Acceptance criteria: root `npm run build` and `proxy/` `npm run build` both pass; grep shows no `api.tfl.gov.uk` anywhere in `src/`; the status board still renders in the simulator (lead will verify if you cannot run it).
+
+---
+
+#### T7 — Phone-side planning UI
+
+**Read this context first, it changes how you think about the file:** the same `index.html` page does two jobs. It renders as an ordinary web page in the Even app's phone webview, AND it drives the glasses through the bridge. The phone side is normal DOM: full HTML/CSS/JS, colour, any layout you like. The 576x288 greyscale container constraints apply ONLY to the glasses bridge calls, never to the phone DOM. The body of `index.html` is currently empty; the phone UI lives there.
+
+**Structural requirement (this will bite if skipped):** `src/main.ts` currently top-level-awaits `waitForEvenAppBridge()`. In a plain desktop browser there is no bridge, that promise never resolves, and everything after it is dead: the phone UI would never boot during development. Restructure so the phone UI initialises unconditionally first, and the existing glasses logic (bridge await, startup container, events, refresh loop) is wrapped in an async function fired with `void` and its own try/catch, so a missing bridge cannot break the phone UI. The glasses status board must keep working unchanged in the simulator.
+
+**What to build (mobile-first single column, dark theme, hand-rolled CSS, no frameworks):**
+
+- **From and To fields** with station search: on input (debounce ~300ms), `GET {API_BASE}/StopPoint/Search/{urlencoded query}?modes=tube,elizabeth-line,dlr,overground,bus`. Response shape (verified): `{ matches: [{ id, icsId, name, lat, lon, modes[], zone }] }`. Show a suggestions list of `name` plus small mode chips; selecting a suggestion fills the field and stores the whole match. **Journey endpoints use `icsId`, never `id`** (verified: hub ids return HTTP 300 free-text disambiguation; `icsId` values return journeys). If a journey response ever comes back 300 anyway, show "Couldn't identify that stop, pick it from the suggestions" rather than attempting disambiguation.
+- **Timing control:** segmented three-way: Now / Leave at / Arrive by. For Now, no timing params. Otherwise append `date=YYYYMMDD&time=HHmm&timeIs=Departing` (leave at) or `timeIs=Arriving` (arrive by), from a `datetime-local` input (verified param format).
+- **Plan action:** two parallel fetches: `GET {API_BASE}/Journey/JourneyResults/{fromIcsId}/to/{toIcsId}?{timing}` and the same with `&mode=bus` added. Combined journeys shape (verified): `{ journeys: [{ duration, startDateTime, arrivalDateTime, fare?: { totalCost }, legs: [{ mode: { name }, departurePoint: { commonName }, arrivalPoint: { commonName } }] }] }`. `duration` is minutes; `totalCost` is pence (display as £X.XX; absent fare shows "fare unavailable"). Fastest = lowest `duration` across the default query's journeys. Cheapest = lowest `totalCost` across ALL journeys from both queries that have a fare. If they are the same journey, show one card labelled "Fastest & cheapest".
+- **Option cards** (one for fastest, one for cheapest): duration large, fare, depart and arrive times, and a leg strip of mode chips with change points, e.g. `WALK → TUBE (Green Park) → BUS (59)`. **Each mode gets a visually distinctive chip** (Jack's requirement): distinct colour per mode on the phone: tube, elizabeth-line, dlr, overground, bus, national-rail, walking. Chip label is `mode.name` for now; per-leg line names (Victoria, 59) are not yet verified fields, so leave them out rather than guessing; the lead will verify them for M3.
+- **Go button** on each card: stores the selected journey object in a module-level variable and logs `Journey selected`. Glasses handoff is M3. **No persistence of any kind this round**: no bridge storage, and the browser localStorage ban applies to the phone side too (same webview).
+- **Error states:** inline messages for search failure, journey fetch failure, and an empty `journeys` array ("No routes found").
+
+Acceptance criteria:
+
+- `npm run build` passes.
+- In a plain desktop browser (`npm run dev`, no simulator): typing "kings" under From lists King's Cross suggestions with mode chips; selecting, then setting To to Brixton and hitting Plan renders fastest and cheapest cards with plausible durations and £ fares within a few seconds. Arrive-by with a future time changes the results' arrival times accordingly.
+- The phone UI boots in the plain browser with no bridge present and no console errors from the glasses path (a single info log that the bridge is unavailable is fine).
+- In the simulator, the glasses status board still renders as before (lead verifies alongside you if needed).
+- Grep checks: no `api.tfl.gov.uk` in `src/`, no `localStorage`/`indexedDB`, no `VITE_`, no TfL key anywhere.
+
+Effort recommendation for Jack: **run this round on high.** T6 is trivial but T7 is genuine design judgement (layout, states, interaction detail are Sol's to shape within the spec).
 
 ---
 
@@ -414,6 +454,15 @@ Findings for the record:
 - `docker build` was not runnable in Sol's or the lead's local environment; the lead will run it on the droplet as part of T5, which satisfies that criterion in the environment that actually matters.
 
 T5 (deploy) proceeds now.
+
+**2026-07-28 — T5 deploy record (lead).** The proxy is live at `https://transit.berrydev.co.uk`.
+
+- The repo is private, so the droplet cannot `git clone` it; deployed by rsyncing `proxy/` to `~/london-transit-hud/proxy/` on the droplet. The key went over ssh stdin into `proxy/.env` (mode 600), never in a command line. If we want git-based deploys later, the repo needs a deploy key or to go public: noted for Jack.
+- `docker compose up -d --build` succeeded on the droplet, which satisfies T4's outstanding `docker build` criterion. Container `proxy-transit-proxy-1` runs with network alias `transit-proxy` on `connect-remote_default`.
+- Added the `transit.berrydev.co.uk` site block to the shared Caddyfile, `caddy validate` passed, reloaded without downtime for the other apps.
+- End-to-end verified over HTTPS from outside: `/healthz` 200 with CORS, live tube status through the proxy (11 lines), non-allowlisted path 404. Fresh Let's Encrypt cert issued automatically.
+- The Caddyfile change is **committed on the droplet's connect-remote checkout but not pushed** (the droplet has no GitHub credentials). Jack: push it from the droplet next time you have credentials there, or tell me and I will sort a deploy key. Until then a `git pull` on the droplet will merge fine; nothing is at risk.
+- Also verified through the live proxy while testing: hub ids (`HUBKGX`) are NOT valid journey locations. TfL treats them as free text and returns HTTP 300 with a list of fuzzy matches (highlight: "Chicken Hub" in Hackney). Search matches carry `icsId` (e.g. `1000129` for King's Cross), and journeys planned with `icsId` values return 200 with journeys and fares. Round B uses `icsId` exclusively.
 
 ---
 
