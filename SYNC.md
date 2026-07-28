@@ -449,6 +449,70 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** State machine, restore-order handling and firmware-constrained layout in one round.
 
+### 2026-07-28 — Round D.2: unblock T10 (verified answers to Sol's two questions)
+
+Both round D blockers were spec gaps on the lead's side. Both contracts below are verified against the installed SDK (or, for the second, against the reality that no published SDK has it).
+
+---
+
+#### T10b — `rebuildPageContainer`, the verified contract
+
+Verbatim from installed `@evenrealities/even_hub_sdk@0.0.12`:
+
+```typescript
+import { RebuildPageContainer } from '@evenrealities/even_hub_sdk'
+// class RebuildPageContainer {
+//   containerTotalNum?: number                 // 1 to 12
+//   listObject?: ListContainerProperty[]
+//   textObject?: TextContainerProperty[]       // max 8
+//   imageObject?: ImageContainerProperty[]     // max 4
+//   constructor(data?: Partial<RebuildPageContainer>)
+// }
+// bridge method: rebuildPageContainer(container: RebuildPageContainer): Promise<boolean>  // true = success
+
+await bridge.rebuildPageContainer(new RebuildPageContainer({
+  containerTotalNum: 3,
+  textObject: [headerContainer, bodyContainer, footerContainer],
+}))
+```
+
+Identical construction pattern to `CreateStartUpPageContainer`. It is a full redraw (brief hardware flicker, expected on page turns). Text content limit on rebuild is 1000 characters per container. Route every call through the existing serialised bridge gate, same as everything else.
+
+---
+
+#### T10c — background persistence without the SDK helpers
+
+Lead-verified: **no published SDK version has `setBackgroundState`/`onBackgroundRestore`** (checked every version on npm, 0.0.6 through 0.0.12; the docs describe an API newer than the release). Sol was right to refuse the import. Implement the documented host contract directly instead. The host behaviour (from project docs): before backgrounding it calls `window.__getStateSnapshot()`, which must return a JSON **string**; after loading the app afresh in the headless WebView it calls `window.__restoreState(snapshot)` with that value. Hand-roll both ends:
+
+```typescript
+declare global {
+  interface Window {
+    __getStateSnapshot?: () => string
+    __restoreState?: (snapshot: unknown) => void
+  }
+}
+
+window.__getStateSnapshot = () => JSON.stringify({ journeyMode: { ...journeyState } })  // snapshot copy, plain JSON only
+
+window.__restoreState = snapshot => {
+  try {
+    const parsed = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot
+    const saved = (parsed as Record<string, unknown> | null)?.['journeyMode']
+    if (saved !== undefined) {
+      applyRestoredJourneyState(saved)   // the prepared restore path: reassign with ?? fallbacks, then re-render if needed
+    }
+  } catch {
+    // malformed snapshot: keep current state
+  }
+}
+```
+
+Register both at module init (top level), same placement rules as the original spec. Be defensive about `snapshot` arriving as a string or an already-parsed object, as shown. The snapshot format inside the string is entirely ours, so the only host-contract surface is the two function names and the round-trip, both documented. Known limitation, recorded: the migration cannot be exercised in the simulator, so this path gets verified on hardware later; and when a future SDK release ships the proper helpers we swap to them (tracked as a standing note).
+
+---
+
+Everything else in T10 stands as specced, including all original acceptance criteria (the simulator run now becomes possible). Effort recommendation for Jack: **medium**, the design work survived round D; this is wiring the two supplied contracts into prepared slots.
+
 ---
 
 ---
@@ -513,6 +577,17 @@ Effort recommendation for Jack: **high.** State machine, restore-order handling 
 - **Verification passed:** Final root and proxy builds pass and `git diff --check` passes. Round B grep checks remain clean: no direct TfL origin, browser storage, `VITE_`, or TfL key in `src/`; one glasses startup call; event reads still use `?? 0`. No glasses code was changed.
 - **Could not verify / deployment dependency:** No controllable browser is available in this environment, so grouped suggestion visuals and the click-through UI flow were not exercised in a real DOM session. The deployed proxy does not have T8 until the lead deploys this round, so the production-base client cannot use `/geocode` before that deployment. The lead should deploy/rebuild the proxy, then verify `kings` ordering, French House selection, stop-to-place planning, and place-to-place planning in Chrome.
 - **Scope:** No persistence, new dependency, SDK behavior, M3 glasses handoff, commit, push, or deployment was added.
+
+**2026-07-28 — T10 partial: journey handoff and static stage content**
+
+- **Implemented:** Installed `@evenrealities/pretext@0.1.4`; added the module-level `{ active, journey, stageIndex }` state; passed the selected plain-JSON journey from the phone Go handler into `enterJourneyMode`; paused status refresh while active; routed journey swipes through clamped stage-index changes; preserved double-tap exit; and made foreground entry request the current stage rather than the status board. If journey state exists before glasses startup (including the development loader), the single lifetime startup call creates the current journey page instead of the status board.
+- **Stage derivation and layouts:** Added one walk/ride stage per leg and a synthetic arrive stage only when the last leg is not walking. Ride pages use the specified 54/198/36 geometry and three text containers; walk pages use the same header/body/footer pattern; arrive uses body/footer. Exactly one container captures events on every layout. The two-line 54px header uses zero padding so two verified 27px lines fit; body/footer retain 4px padding and the specified 568px inner width where measured.
+- **Measured content:** Ride headers, station names, detail lines, walk text, and the route bar use `getTextWidth`, `measureTextWrap`, and `pxTruncate`. The bar uses only `●`, `○`, and `─`, retains every line segment while progressively thinning intermediate circles, and refuses to return a wrapping bar. The footer is exactly `Swipe: stages   2x tap: exit`. A live `1000129/1000031` fixture derived `ride, arrive`; every emitted line measured as one line at 568px, with the nine-stop bar measuring 380px.
+- **Development hook:** Added the development-only `?dev-journey=<from>/<to>` loader, which fetches the first journey and enters journey mode before glasses initialisation. A production build contains no `dev-journey` string.
+- **Background-state blocker / question for the lead:** The Plan's verbatim imports do not exist in the installed `@evenrealities/even_hub_sdk@0.0.12`. Importing them produces `TS2305: Module '"@evenrealities/even_hub_sdk"' has no exported member 'setBackgroundState'` and the same error for `onBackgroundRestore`. I left the state restore function prepared with a reassignment and `??` fallback per field, but did not register invented hooks. Please provide the exact verified import module/package version, or explicitly direct an SDK upgrade.
+- **Page-rebuild blocker / question for the lead:** The Plan names `rebuildPageContainer` but does not quote its method signature, required parameter class/import, argument shape, or return contract. I did not infer these from the method name or inspect SDK documentation. Please provide the exact verified construction and call. Until then, post-startup Go, restore-after-init, foreground re-render, and stage swipes update state and pause refresh but cannot redraw the glasses page; `requestJourneyRender` logs that this path is blocked.
+- **Verification:** Root `npm run build` and proxy `npm run build` pass; `git diff --check` passes. The installed versions are SDK `0.0.12` and pretext `0.1.4`. Standing checks remain clean: no direct TfL origin, browser storage, `VITE_`, or TfL key in `src/`; one startup-page call; event reads use `?? 0`. The new dependency emitted only the existing Node-engine warning during install.
+- **Could not verify:** The simulator acceptance, stage rebuild serialisation, background snapshot/restore in both ordering cases, and a real post-startup phone Go redraw depend on the two missing verified SDK contracts above. I did not mark those criteria met. No milestone 3 round E work, deployment, commit, or push was performed.
 
 ---
 
@@ -600,6 +675,8 @@ T5 (deploy) proceeds now.
 - **Quality notes:** the `new URL('/geocode', apiBase)` resolution correctly lands on the proxy root rather than under `/tfl`, the Photon `[lon, lat]` flip is validated field by field before shaping, and single-provider failure degrades gracefully to the surviving provider's results. All exactly as specced, several caught-in-advance traps avoided.
 
 Milestone 2 round C complete. Next: milestone 3 planning (glasses handoff).
+
+**2026-07-28 — Interim review of round D (T10 partial).** Both blockers Sol raised are legitimate and both were the lead's spec gaps: `rebuildPageContainer` was named without its construction contract, and the background-state helpers were quoted from docs that are ahead of every published SDK version (lead-verified on npm: nothing from 0.0.6 to 0.0.12 exports them; Sol's refusal to invent the import was exactly right, again). Verified answers are in Plan round D.2. Red-flag scan of the partial implementation is clean: one startup call site, exactly one event-capturing container per layout, container names within the 16-char limit, builds and standing greps pass, and the measured route bar (nine stops at 380px) confirms the glyph arithmetic. Full review after the D.2 rerun; not committing the partial round.
 
 **2026-07-28 addendum after discussion with Jack:** stop-to-stop is not enough; users must be able to type a bar or venue name and get there. TfL's gazetteer cannot do POIs, so a proper geocoder feeds lat,long into the journey call. **Decision: Photon (photon.komoot.io), OSM-backed, free, keyless, built for typeahead, routed through our proxy.** Verified live: "ministry of sound" returns the nightclub with correct coordinates and postcode; "french house soho" returns the pub. Nominatim's public instance is ruled out because its usage policy prohibits autocomplete-style traffic; Mapbox is the paid fallback if Photon's quality or availability disappoints, and the proxy indirection means swapping upstream later without touching the client. Tasked as milestone 2 round C below.
 
