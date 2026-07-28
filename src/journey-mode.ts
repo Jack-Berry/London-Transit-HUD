@@ -1,11 +1,14 @@
 import { getTextWidth, measureTextWrap, pxTruncate } from '@evenrealities/pretext'
 import type { Journey, JourneyLeg } from './phone'
+import { cleanGlassesText } from './glasses-text'
 
 const INNER_WIDTH = 568
 const DISPLAY_WIDTH = 576
 const DISPLAY_INSET = 12
 const MIN_TOP_GAP = 10
 const ROUTE_BAR_WIDTH = 520
+export const ALERT_CONTAINER_WIDTH = 400
+export const ALERT_CONTAINER_X = (DISPLAY_WIDTH - ALERT_CONTAINER_WIDTH) / 2
 const ENDPOINT_GAP = 12
 const ENDPOINT_MAX_WIDTH = (
   DISPLAY_WIDTH - (2 * DISPLAY_INSET) - ENDPOINT_GAP
@@ -29,6 +32,11 @@ export interface PositionedLine {
   content: string
   xPosition: number
   width: number
+}
+
+export interface JourneyAlertCandidate {
+  key: string
+  content: string
 }
 
 export type StagePageContent =
@@ -64,6 +72,8 @@ export function buildStagePage(
   stage: JourneyStage,
   stageIndex: number,
   stageTotal: number,
+  passedStopCount = 0,
+  rideHasStarted = false,
 ): StagePageContent {
   if (stage.type === 'walk') {
     return buildWalkPage(stage.leg, stageIndex, stageTotal)
@@ -77,29 +87,40 @@ export function buildStagePage(
     }
   }
 
-  return buildRidePage(stage.leg, stageIndex, stageTotal)
+  return buildRidePage(
+    stage.leg,
+    stageIndex,
+    stageTotal,
+    passedStopCount,
+    rideHasStarted,
+  )
 }
 
 function buildRidePage(
   leg: JourneyLeg,
   stageIndex: number,
   stageTotal: number,
+  passedStopCount: number,
+  rideHasStarted: boolean,
 ): StagePageContent {
   const summary = leg.instruction?.summary
     ?? leg.routeOptions?.[0]?.name
     ?? leg.mode?.name
     ?? 'Journey stage'
   const departure = fitLine(
-    trimUndergroundStation(leg.departurePoint?.commonName ?? 'Departure'),
+    leg.departurePoint?.commonName ?? 'Departure',
     ENDPOINT_MAX_WIDTH,
   )
   const arrival = fitLine(
-    trimUndergroundStation(leg.arrivalPoint?.commonName ?? 'Arrival'),
+    leg.arrivalPoint?.commonName ?? 'Arrival',
     ENDPOINT_MAX_WIDTH,
   )
   const stopPoints = leg.path?.stopPoints ?? []
-  const intermediateStopCount = Math.max(0, stopPoints.length - 1)
-  const bar = buildMeasuredBar(intermediateStopCount, ROUTE_BAR_WIDTH)
+  const bar = buildMeasuredBar(
+    stopPoints.length,
+    passedStopCount,
+    rideHasStarted,
+  )
   const bottomBar = positionCentered(bar)
   const arrivalLabel = `Arrive ${formatTime(leg.arrivalTime)}`
   const stageLabel = `Stage ${stageIndex + 1} of ${stageTotal}`
@@ -155,87 +176,74 @@ function isWalkingLeg(leg: JourneyLeg): boolean {
 }
 
 function buildMeasuredBar(
-  intermediateStopCount: number,
-  maxWidth = INNER_WIDTH,
+  stopCount: number,
+  passedStopCount: number,
+  rideHasStarted: boolean,
 ): string {
-  let markerStride = 1
-  let displayedIntermediateCount = intermediateStopCount
-  let bar = renderBar(intermediateStopCount, markerStride)
-
-  while (!isSingleLine(bar, maxWidth) && markerStride <= intermediateStopCount) {
-    markerStride *= 2
-    bar = renderBar(intermediateStopCount, markerStride)
-  }
-
-  if (!isSingleLine(bar, maxWidth)) {
-    bar = renderBar(intermediateStopCount, Number.POSITIVE_INFINITY)
-  }
-
-  if (!isSingleLine(bar, maxWidth)) {
-    const maxIntermediateMarkers = Math.max(
-      0,
-      Math.floor(((maxWidth / getTextWidth('─')) - 3) / 2),
-    )
-    displayedIntermediateCount = Math.min(
-      intermediateStopCount,
-      maxIntermediateMarkers,
-    )
-    markerStride = 1
-    bar = renderBar(displayedIntermediateCount, markerStride)
-  }
-
-  if (!isSingleLine(bar, maxWidth)) {
-    throw new Error(`Compressed route bar exceeds ${maxWidth}px`)
-  }
-
-  const extraConnectors = Math.max(
+  const glyphWidth = getTextWidth('─')
+  const targetGlyphCount = Math.floor(ROUTE_BAR_WIDTH / glyphWidth)
+  const maxIntermediateMarkers = Math.max(
     0,
-    Math.floor((maxWidth - getTextWidth(bar)) / getTextWidth('─')),
+    Math.floor((targetGlyphCount - 3) / 2),
   )
-  const expanded = renderBar(
-    displayedIntermediateCount,
-    markerStride,
-    extraConnectors,
+  const intermediateStopCount = Math.max(0, stopCount - 1)
+  const displayedStopIndices = selectDisplayedStopIndices(
+    intermediateStopCount,
+    maxIntermediateMarkers,
   )
-
-  if (!isSingleLine(expanded, maxWidth)) {
-    throw new Error(`Expanded route bar exceeds ${maxWidth}px`)
-  }
-
-  return expanded
-}
-
-function renderBar(
-  intermediateStopCount: number,
-  markerStride: number,
-  extraConnectors = 0,
-): string {
-  let bar = '●'
-  const segmentCount = intermediateStopCount + 1
+  const connectorCount = targetGlyphCount - 2 - displayedStopIndices.length
+  const segmentCount = displayedStopIndices.length + 1
+  let bar = rideHasStarted ? '●' : '○'
 
   for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
-    const previousExtras = Math.floor(
-      (extraConnectors * segmentIndex) / segmentCount,
+    const previousConnectors = Math.floor(
+      (connectorCount * segmentIndex) / segmentCount,
     )
-    const currentExtras = Math.floor(
-      (extraConnectors * (segmentIndex + 1)) / segmentCount,
+    const currentConnectors = Math.floor(
+      (connectorCount * (segmentIndex + 1)) / segmentCount,
     )
-    bar += '─'.repeat(1 + currentExtras - previousExtras)
+    bar += '─'.repeat(currentConnectors - previousConnectors)
 
-    if (segmentIndex < intermediateStopCount) {
-      const showMarker = Number.isFinite(markerStride)
-        && segmentIndex % markerStride === 0
-      if (showMarker) {
-        bar += '○'
-      }
+    const stopIndex = displayedStopIndices[segmentIndex]
+    if (stopIndex !== undefined) {
+      bar += passedStopCount >= stopIndex + 1 ? '●' : '○'
     }
   }
 
-  return `${bar}●`
+  bar += stopCount > 0 && passedStopCount >= stopCount ? '●' : '○'
+
+  if (
+    getTextWidth(bar) !== ROUTE_BAR_WIDTH
+    || measureTextWrap(bar, ROUTE_BAR_WIDTH).lineCount !== 1
+  ) {
+    throw new Error('Route bar width changed while applying live fill')
+  }
+
+  return bar
+}
+
+function selectDisplayedStopIndices(
+  intermediateStopCount: number,
+  maximum: number,
+): number[] {
+  if (intermediateStopCount <= maximum) {
+    return Array.from({ length: intermediateStopCount }, (_, index) => index)
+  }
+
+  if (maximum <= 1) {
+    return maximum === 1 ? [intermediateStopCount - 1] : []
+  }
+
+  return Array.from(
+    { length: maximum },
+    (_, index) => Math.round(
+      (index * (intermediateStopCount - 1)) / (maximum - 1),
+    ),
+  )
 }
 
 function fitLine(text: string, maxWidth: number): string {
-  const truncated = pxTruncate(text, maxWidth)
+  const truncated = pxTruncate(cleanGlassesText(text), maxWidth)
   if (!isSingleLine(truncated, maxWidth)) {
     throw new Error(`Measured text still wraps at ${maxWidth}px`)
   }
@@ -254,6 +262,113 @@ function positionCentered(content: string): PositionedLine {
     xPosition: Math.max(0, Math.floor((DISPLAY_WIDTH - width) / 2)),
     width,
   }
+}
+
+export function passedStopsAt(leg: JourneyLeg, atMs: number): number {
+  const timeline = legTimeline(leg)
+  if (timeline === undefined || timeline.stopCount === 0) {
+    return 0
+  }
+  if (atMs <= timeline.departureMs) {
+    return 0
+  }
+  if (atMs >= timeline.arrivalMs) {
+    return timeline.stopCount
+  }
+
+  return Math.min(
+    timeline.stopCount,
+    Math.max(
+      0,
+      Math.floor(
+        ((atMs - timeline.departureMs) * timeline.stopCount)
+        / (timeline.arrivalMs - timeline.departureMs),
+      ),
+    ),
+  )
+}
+
+export function rideHasStartedAt(leg: JourneyLeg, atMs: number): boolean {
+  const timeline = legTimeline(leg)
+  return timeline !== undefined && atMs >= timeline.departureMs
+}
+
+export function journeyAlertAt(
+  journey: Journey,
+  atMs: number,
+): JourneyAlertCandidate | undefined {
+  let nextStopAlert: JourneyAlertCandidate | undefined
+
+  for (let legIndex = 0; legIndex < journey.legs.length; legIndex += 1) {
+    const leg = journey.legs[legIndex]!
+    if (isWalkingLeg(leg)) {
+      continue
+    }
+
+    const timeline = legTimeline(leg)
+    if (timeline === undefined || timeline.stopCount === 0) {
+      continue
+    }
+
+    if (
+      atMs >= timeline.arrivalMs - 30_000
+      && atMs < timeline.arrivalMs
+    ) {
+      return {
+        key: `stop:${legIndex}:${timeline.arrivalMs}`,
+        content: 'This is your stop',
+      }
+    }
+
+    const nextStopTrigger = timeline.stopCount === 1
+      ? timeline.departureMs
+      : timeline.departureMs
+        + (
+          (timeline.arrivalMs - timeline.departureMs)
+          * (timeline.stopCount - 1)
+        ) / timeline.stopCount
+    const nextStopEnd = Math.min(nextStopTrigger + 10_000, timeline.arrivalMs)
+    if (
+      nextStopAlert === undefined
+      && atMs >= nextStopTrigger
+      && atMs < nextStopEnd
+    ) {
+      nextStopAlert = {
+        key: `next:${legIndex}:${nextStopTrigger}`,
+        content: `Next stop: ${leg.arrivalPoint?.commonName ?? 'destination'}`,
+      }
+    }
+  }
+
+  return nextStopAlert
+}
+
+export function buildAlertContainerContent(message?: string): string {
+  if (message === undefined) {
+    return ' '
+  }
+
+  const fitted = fitLine(message, ALERT_CONTAINER_WIDTH)
+  const availableLeftWidth = Math.max(
+    0,
+    (ALERT_CONTAINER_WIDTH - getTextWidth(fitted)) / 2,
+  )
+  let leadingSpaces = Math.floor(availableLeftWidth / getTextWidth(' '))
+  let content = `${' '.repeat(leadingSpaces)}${fitted}`
+
+  while (
+    leadingSpaces > 0
+    && !isSingleLine(content, ALERT_CONTAINER_WIDTH)
+  ) {
+    leadingSpaces -= 1
+    content = `${' '.repeat(leadingSpaces)}${fitted}`
+  }
+
+  if (!isSingleLine(content, ALERT_CONTAINER_WIDTH)) {
+    throw new Error('Centred alert content exceeds its fixed container')
+  }
+
+  return content
 }
 
 function positionLeftAt(content: string, xPosition: number): PositionedLine {
@@ -277,9 +392,26 @@ function measuredWidth(content: string): number {
   return Math.max(1, Math.ceil(getTextWidth(content)))
 }
 
-function trimUndergroundStation(name: string): string {
-  const trimmed = name.replace(/\s+Underground Station$/i, '').trim()
-  return trimmed.length > 0 ? trimmed : name
+function legTimeline(leg: JourneyLeg): {
+  departureMs: number
+  arrivalMs: number
+  stopCount: number
+} | undefined {
+  const departureMs = Date.parse(leg.departureTime ?? '')
+  const arrivalMs = Date.parse(leg.arrivalTime ?? '')
+  if (
+    !Number.isFinite(departureMs)
+    || !Number.isFinite(arrivalMs)
+    || arrivalMs <= departureMs
+  ) {
+    return undefined
+  }
+
+  return {
+    departureMs,
+    arrivalMs,
+    stopCount: leg.path?.stopPoints?.length ?? 0,
+  }
 }
 
 function positionSpreadTopRow(
@@ -287,14 +419,17 @@ function positionSpreadTopRow(
   centerContent: string,
   rightContent: string,
 ): [PositionedLine, PositionedLine, PositionedLine] {
-  const centerWidth = measuredWidth(centerContent)
-  const rightWidth = measuredWidth(rightContent)
+  const cleanedLeft = cleanGlassesText(leftContent)
+  const cleanedCenter = cleanGlassesText(centerContent)
+  const cleanedRight = cleanGlassesText(rightContent)
+  const centerWidth = measuredWidth(cleanedCenter)
+  const rightWidth = measuredWidth(cleanedRight)
   const availableWidth = DISPLAY_WIDTH - (2 * DISPLAY_INSET)
   const maxLeftWidth = Math.max(
     1,
     availableWidth - centerWidth - rightWidth - (2 * MIN_TOP_GAP),
   )
-  const fittedLeft = fitLine(leftContent, maxLeftWidth)
+  const fittedLeft = fitLine(cleanedLeft, maxLeftWidth)
   const leftWidth = measuredWidth(fittedLeft)
   const totalGap = Math.max(
     0,
@@ -309,12 +444,12 @@ function positionSpreadTopRow(
       width: leftWidth,
     },
     {
-      content: centerContent,
+      content: cleanedCenter,
       xPosition: DISPLAY_INSET + leftWidth + firstGap,
       width: centerWidth,
     },
     {
-      content: rightContent,
+      content: cleanedRight,
       xPosition: DISPLAY_WIDTH - DISPLAY_INSET - rightWidth,
       width: rightWidth,
     },

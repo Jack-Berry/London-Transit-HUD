@@ -65,7 +65,25 @@
       "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o stage0.png)",
       "Bash(awk '/^## Execution notes/,/^## Review$/' SYNC.md)",
       "Bash(curl -s http://127.0.0.1:9899/api/ping)",
-      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o t11-stage0.png)"
+      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o t11-stage0.png)",
+      "Bash(ssh -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'mkdir -p ~/london-transit-hud-site')",
+      "Bash(rsync -az --delete dist/ deploy@car-proxy.berrydev.co.uk:~/london-transit-hud-site/)",
+      "Bash(ssh -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'ls ~/london-transit-hud-site/')",
+      "Bash(curl -s https://transit.berrydev.co.uk/)",
+      "Bash(curl -s https://transit.berrydev.co.uk/app.json)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['package_id'], '|', d['permissions'][0].get\\('whitelist'\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; print\\('lines:', len\\(json.load\\(sys.stdin\\)\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' 'https://transit.berrydev.co.uk/geocode?q=brixton')",
+      "Bash(curl -s -o /dev/null -w 'car-proxy: %{http_code}\\\\n' https://car-proxy.berrydev.co.uk/healthz)",
+      "Bash(curl -s -o /dev/null -w 'ableshow: %{http_code}\\\\n' https://ableshow.app/)",
+      "Bash(curl -s -o /dev/null -w 'matchhud: %{http_code}\\\\n' https://matchhud.berrydev.co.uk/)",
+      "Bash(sed 's|http://localhost:5174|https://transit.berrydev.co.uk|' planner-test.mjs)",
+      "Bash(node prod-test.mjs .)",
+      "Bash(ssh -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'cd ~/connect-remote && git -c user.name=\"Jack Berry\" -c user.email=\"jackdanielberry@gmail.com\" commit -m \"Serve London Transit HUD static app on transit.berrydev.co.uk alongside its proxy routes\" deploy/Caddyfile docker-compose.yml | tail -1')",
+      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o e-midleg.png)",
+      "Bash(curl -s -o /dev/null -w \"5173: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"5174: %{http_code}\\\\n\" http://localhost:5174/)",
+      "Bash(curl -s --max-time 1 http://127.0.0.1:9899/api/ping)"
     ]
   }
 }

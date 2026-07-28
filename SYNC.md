@@ -578,6 +578,16 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** Time-derived state, cross-layout alert plumbing and careful update discipline.
 
+### 2026-07-28 — Round E.2: even circle spacing on the route bar (T12b)
+
+Jack's note from reviewing the live bar: the circles must be **evenly spaced**. The current connector distribution hands the remainder out unevenly (`Math.floor` proportional split), so some gaps get an extra `─`. Fix in `buildMeasuredBar`/`renderBar` (src/journey-mode.ts):
+
+- Make the per-segment connector count uniform: `k = floor((targetGlyphCount - 2 - displayedMarkerCount) / segmentCount)`, minimum 1, and give EVERY segment exactly `k` connectors. No remainder distribution.
+- The bar therefore gets slightly narrower than 520px: `width = (2 + displayedMarkerCount + segmentCount * k) * 20`. Centre it with the existing positioning helpers and keep the names anchored to the new bar ends (`bottomDeparture`/`bottomArrival` already derive from `bottomBar.xPosition` and width, so this should follow automatically; verify).
+- Width invariance under live fill still holds (`●`/`○` both 20px); keep the existing assertion, updated to the computed width rather than the 520 constant.
+
+Acceptance: builds and greps pass; simulator screenshot shows visibly uniform gaps for the nine-stop fixture; the assertion uses the computed width; live fill, alerts and thinned/capped bars unaffected. Effort: **light**, one function plus its assertion.
+
 ### 2026-07-28 — Queued, not yet tasked: phone UI restyle
 
 Jack likes the phone app's polish but it is not his vibe. A visual revision round is queued, **blocked on Jack providing reference examples** (apps or sites whose look he wants, plus specific dislikes about the current design). The lead will translate the examples into a concrete restyle spec for Sol once they arrive. Functionality, markup structure and accessibility are to be preserved; this is a skin, not a rebuild.
@@ -736,6 +746,13 @@ Jack likes the phone app's polish but it is not his vibe. A visual revision roun
 - **Verification:** Root and proxy builds pass and `git diff --check` passes. The production bundle contains neither `dev-journey` nor `dev-clock`; standing storage, key, origin, event-elision, startup-count, and route-glyph checks remain clean. Simulator startup returned 0 without errors. Screenshots verified a partial current-leg bar, `Next stop: Brixton Underground Station`, its ten-second clear, centred `This is your stop`, the alert retained on the hidden HUD, stage-change clearing, a completely hollow future London Bridge-to-Canary Wharf leg, and the partial current leg restored on swipe back. Arrival produced one alert-clear upgrade and one final bar upgrade. Console evidence showed bar/alert upgrades only at content transitions and every rebuild/upgrade entering the serialised bridge gate.
 - **Could not verify / questions:** The simulator cannot verify continued ticking during the real phone background migration or final rendering on G2 hardware; those remain for lead/hardware verification. No SDK question arose, and no SDK documentation was consulted. No deployment, commit, or push was performed.
 
+**2026-07-28 — Jack-requested glasses-wide station-name cleanup**
+
+- **Implementation:** Added one glasses-text normalizer that removes every case-insensitive occurrence of `Underground Station`, repairs the surrounding whitespace/punctuation, and retains the required single-space fallback if removal would otherwise produce empty content. Journey text is cleaned before measurement and truncation, covering ride summaries, departure/arrival labels, walk instructions and fallback names, and next-stop alerts. Dynamic status-board names/descriptions use the same normalizer. The phone planner remains unchanged and continues to show TfL's original names.
+- **Decision:** Centralised the rule at the glasses text-formatting boundaries rather than changing the stored journey JSON, so snapshots, route comparison data, phone rendering, and API responses retain their source values while every glasses layout benefits from the shorter measured string.
+- **Verification:** Root and proxy builds pass and `git diff --check` passes. Five direct fixtures passed for endpoint, walk, alert, mixed-case, punctuation, and empty-result behavior; `Underground Station` now occurs in `src/` only as the normalizer's matching expression. No simulator run was needed for this text-only preprocessing change, so final hardware typography remains for lead/device confirmation.
+- **Scope/questions:** No SDK behavior, container geometry, bridge call, input, persistence, key handling, deployment, commit, or push changed. Nothing surprising arose and there are no questions for the lead.
+
 ---
 
 ## Review
@@ -847,6 +864,16 @@ Milestone 2 round C complete. Next: milestone 3 planning (glasses handoff).
 - **Production verification:** full Playwright click-through against the live URL: search suggestions, fastest (15 min £3.10) and cheapest (50 min £1.75) cards, Go, journey handoff logged, zero page errors.
 - **Sideload:** `npx evenhub qr --url https://transit.berrydev.co.uk` generates the install QR for the Even Hub companion app. Redeploying the client is: `npm run build && cp app.json dist/ && rsync -az --delete dist/ deploy@car-proxy.berrydev.co.uk:~/london-transit-hud-site/` (no Caddy reload needed).
 - **Hardware test checklist for Jack's first session:** plan and Go from the phone inside the Even app; band layout legibility and dominance through real lenses; swipe feel and rebuild flicker on page turns; tap-to-hide notice, 5-second fade and restore; double-tap exit dialog visuals; pocket the phone mid-journey and return (background migration hooks, the big unverified one); status board on plain launch.
+
+**2026-07-28 — Review of round E (T12 plus the station-name cleanup). SIGNED OFF; one cosmetic correction specced as T12b.** The lead independently verified the full time-travel matrix in the simulator with dev-clock offsets computed from live journeys:
+
+- **Mid-leg fill (+10 min):** five filled, four hollow, clean boundary; station names shortened by the cleanup (screenshots on file).
+- **`Next stop: Brixton`:** appears centred above the bar inside its 10-second window, confirmed by the `Journey alert update` gate log and a 391-lit-pixel alert row. For the record: the lead's first two attempts to catch this window failed due to test-rig faults (a Vite port race sending the simulator to a dead URL), NOT a code defect; Sol's implementation was correct throughout.
+- **`This is your stop`:** shows from T-30, bar fully filled except the destination; and the alert renders on the hidden layout alongside the hide notice, exactly per spec.
+- **Code quality:** the trigger arithmetic matches the spec precisely; the always-present alert container keeps every update flicker-free; upgrade labels (`Journey alert update`, `Live bar update`) make the gate auditable; the evenly-sampled marker selection for long legs is an accepted improvement over the spec's first-N capping; the space-padded centring inside the fixed 400px alert container is a resourceful answer to the no-alignment constraint. The station-name cleanup at the formatting boundary (source data untouched) is the right architecture.
+- **Carried forward:** continued ticking through a real background migration and on-hardware rendering remain hardware-verification items, as recorded since round D.
+- **T12b (even circle spacing, Jack's note) is the only correction**, specced above; cosmetic, light effort.
+- **Deployed:** the lead rebuilt and redeployed the hosted copy at transit.berrydev.co.uk with round E included.
 
 **Milestone 3 round D is done. The core vision now runs end to end:** plan on the phone (stations, stops, bars or venues), compare fastest and cheapest, hit Go, and the glasses show swipeable stage pages with the notched route bar. Next: round E, live position: interpolate between the leg's timestamps across its stops, move a marker along the bar via flicker-free `textContainerUpgrade`, show time-to-next-stop, and surface per-leg disruptions (the API's `isDisrupted`/`disruptions` fields, per Jack's route-relevant-only rule).
 

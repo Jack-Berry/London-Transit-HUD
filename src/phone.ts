@@ -1,3 +1,5 @@
+import { now } from './clock'
+
 interface StationMatch {
   id: string
   icsId: string
@@ -135,7 +137,7 @@ export function initializePhoneUi(
     form.querySelectorAll<HTMLInputElement>('input[name="timing"]'),
   )
 
-  datetimeInput.min = toDatetimeLocalValue(new Date())
+  datetimeInput.min = toDatetimeLocalValue(new Date(now()))
   datetimeInput.value = toDatetimeLocalValue(nextHalfHour())
 
   bindStationSearch(fromControl, apiBase)
@@ -814,7 +816,7 @@ function setPlanningState(button: HTMLButtonElement, isPlanning: boolean): void 
 }
 
 function nextHalfHour(): Date {
-  const date = new Date()
+  const date = new Date(now())
   date.setSeconds(0, 0)
   date.setMinutes(Math.ceil((date.getMinutes() + 1) / 30) * 30)
   return date

@@ -7,10 +7,18 @@ import {
 } from '@evenrealities/even_hub_sdk'
 import { initializePhoneUi, type Journey } from './phone'
 import {
+  ALERT_CONTAINER_WIDTH,
+  ALERT_CONTAINER_X,
+  buildAlertContainerContent,
   buildStagePage,
   deriveJourneyStages,
+  journeyAlertAt,
+  passedStopsAt,
+  rideHasStartedAt,
   type StagePageContent,
 } from './journey-mode'
+import { now, setClockOffsetSeconds } from './clock'
+import { cleanGlassesText } from './glasses-text'
 import './styles.css'
 
 declare global {
@@ -26,6 +34,7 @@ const STATUS_PATH = '/Line/Mode/tube,elizabeth-line,dlr,overground/Status'
 const REFRESH_INTERVAL_MS = 60_000
 const BRIDGE_TIMEOUT_MS = 5_000
 const HIDDEN_NOTICE_MS = 5_000
+const JOURNEY_TICK_MS = 1_000
 const MAX_BOARD_CHARACTERS = 475
 const LINE_NAME_WIDTH = 13
 
@@ -54,6 +63,7 @@ let journeyState: JourneyState = {
 let journeyStateVersion = 0
 let journeyRenderRequest: (() => void) | undefined
 let hudTimerCancelRequest: (() => void) | undefined
+let journeyLiveResetRequest: (() => void) | undefined
 
 function restoreJourneyState(saved: unknown): void {
   if (saved === null || typeof saved !== 'object') {
@@ -69,6 +79,7 @@ function restoreJourneyState(saved: unknown): void {
   }
   journeyStateVersion += 1
   hudTimerCancelRequest?.()
+  journeyLiveResetRequest?.()
 
   if (journeyState.active) {
     journeyRenderRequest?.()
@@ -98,6 +109,9 @@ window.__restoreState = snapshot => {
   }
 }
 
+if (import.meta.env.DEV) {
+  configureDevClock()
+}
 initializePhoneUi(API_BASE, enterJourneyMode)
 const devJourneyLoad = import.meta.env.DEV ? loadDevJourney() : Promise.resolve()
 void initializeApplication().catch(() => {
@@ -117,8 +131,25 @@ function enterJourneyMode(journey: Journey): void {
     hudHidden: false,
   }
   journeyStateVersion += 1
+  journeyLiveResetRequest?.()
   console.log('Journey handoff')
   journeyRenderRequest?.()
+}
+
+function configureDevClock(): void {
+  const value = new URLSearchParams(window.location.search).get('dev-clock')
+  if (value === null) {
+    return
+  }
+
+  const seconds = Number(value)
+  if (!Number.isFinite(seconds)) {
+    console.error('Invalid dev-clock value')
+    return
+  }
+
+  setClockOffsetSeconds(seconds)
+  console.log(`Dev clock offset set to ${seconds} seconds`)
 }
 
 async function loadDevJourney(): Promise<void> {
@@ -159,7 +190,7 @@ async function loadDevJourney(): Promise<void> {
   }
 }
 
-function currentStagePage(): StagePageContent | undefined {
+function currentStagePage(atMs = now()): StagePageContent | undefined {
   if (!journeyState.active || journeyState.journey === null) {
     return undefined
   }
@@ -174,7 +205,20 @@ function currentStagePage(): StagePageContent | undefined {
     journeyState = { ...journeyState, stageIndex }
   }
 
-  return buildStagePage(stages[stageIndex]!, stageIndex, stages.length)
+  const stage = stages[stageIndex]!
+  const passedStopCount = stage.type === 'ride'
+    ? passedStopsAt(stage.leg, atMs)
+    : 0
+  const rideHasStarted = stage.type === 'ride'
+    ? rideHasStartedAt(stage.leg, atMs)
+    : false
+  return buildStagePage(
+    stage,
+    stageIndex,
+    stages.length,
+    passedStopCount,
+    rideHasStarted,
+  )
 }
 
 function createStatusContainers(): TextContainerProperty[] {
@@ -208,7 +252,26 @@ function createStatusContainers(): TextContainerProperty[] {
   ]
 }
 
-function createStageContainers(page: StagePageContent): TextContainerProperty[] {
+function createAlertContainer(content: string): TextContainerProperty {
+  return new TextContainerProperty({
+    xPosition: ALERT_CONTAINER_X,
+    yPosition: 166,
+    width: ALERT_CONTAINER_WIDTH,
+    height: 27,
+    borderWidth: 0,
+    borderColor: 5,
+    paddingLength: 0,
+    containerID: 8,
+    containerName: 'alert',
+    content,
+    isEventCapture: 0,
+  })
+}
+
+function createStageContainers(
+  page: StagePageContent,
+  alertContent: string,
+): TextContainerProperty[] {
   if (page.type === 'ride') {
     return [
       new TextContainerProperty({
@@ -302,6 +365,7 @@ function createStageContainers(page: StagePageContent): TextContainerProperty[] 
         content: page.bottomCount.content,
         isEventCapture: 0,
       }),
+      createAlertContainer(alertContent),
     ]
   }
 
@@ -337,10 +401,11 @@ function createStageContainers(page: StagePageContent): TextContainerProperty[] 
     }))
   }
 
+  containers.push(createAlertContainer(alertContent))
   return containers
 }
 
-function createHiddenContainers(): TextContainerProperty[] {
+function createHiddenContainers(alertContent: string): TextContainerProperty[] {
   return [
     new TextContainerProperty({
       xPosition: 0,
@@ -355,20 +420,47 @@ function createHiddenContainers(): TextContainerProperty[] {
       content: 'HUD hidden · tap to show',
       isEventCapture: 1,
     }),
+    createAlertContainer(alertContent),
   ]
 }
 
 async function initializeGlasses(): Promise<void> {
   const bridge = await waitForEvenAppBridge()
-  const initialStagePage = currentStagePage()
+  const dismissedAlertKeys = new Set<string>()
+
+  function currentAlertContainerContent(atMs = now()): string {
+    if (!journeyState.active || journeyState.journey === null) {
+      return ' '
+    }
+
+    const candidate = journeyAlertAt(journeyState.journey, atMs)
+    return candidate === undefined || dismissedAlertKeys.has(candidate.key)
+      ? ' '
+      : buildAlertContainerContent(candidate.content)
+  }
+
+  function dismissCurrentAlert(): void {
+    if (!journeyState.active || journeyState.journey === null) {
+      return
+    }
+
+    const candidate = journeyAlertAt(journeyState.journey, now())
+    if (candidate !== undefined) {
+      dismissedAlertKeys.add(candidate.key)
+    }
+  }
+
+  const startupTime = now()
+  const startupAlertContent = currentAlertContainerContent(startupTime)
+  const initialStagePage = currentStagePage(startupTime)
   const startupJourneyVersion = initialStagePage === undefined
     ? undefined
     : journeyStateVersion
   const startupContainers = initialStagePage === undefined
     ? createStatusContainers()
     : journeyState.hudHidden
-      ? createHiddenContainers()
-      : createStageContainers(initialStagePage)
+      ? createHiddenContainers(startupAlertContent)
+      : createStageContainers(initialStagePage, startupAlertContent)
 
   function withBridgeTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
@@ -406,8 +498,23 @@ async function initializeGlasses(): Promise<void> {
   let exitRequestQueued = false
   let bridgeCallPending: Promise<unknown> | null = null
   let journeyRenderQueued = false
+  let journeyRenderInFlight = false
   let hiddenClearQueued = false
   let hiddenNoticeTimer: ReturnType<typeof setTimeout> | undefined
+  let journeyTickInterval: ReturnType<typeof setInterval> | undefined
+  let desiredAlertContent = startupAlertContent
+  let renderedAlertContent = initialStagePage === undefined
+    ? undefined
+    : startupAlertContent
+  let desiredBarContent = (
+    initialStagePage?.type === 'ride'
+    && !journeyState.hudHidden
+  )
+    ? initialStagePage.bottomBar.content
+    : undefined
+  let renderedBarContent = desiredBarContent
+  let liveUpdateQueued = false
+  let liveUpdateInFlight = false
 
   function startBridgeCall<T>(
     label: string,
@@ -427,6 +534,8 @@ async function initializeGlasses(): Promise<void> {
         void flushExitRequest()
       } else if (journeyRenderQueued) {
         void flushJourneyRender()
+      } else if (liveUpdateQueued) {
+        void flushLiveUpdates()
       } else {
         void flushHiddenNoticeClear()
       }
@@ -445,8 +554,12 @@ async function initializeGlasses(): Promise<void> {
         continue
       }
 
-      const name = line.name.slice(0, LINE_NAME_WIDTH).padEnd(LINE_NAME_WIDTH)
-      const status = line.lineStatuses[0].statusSeverityDescription
+      const name = cleanGlassesText(line.name)
+        .slice(0, LINE_NAME_WIDTH)
+        .padEnd(LINE_NAME_WIDTH)
+      const status = cleanGlassesText(
+        line.lineStatuses[0].statusSeverityDescription,
+      )
       const nextLine = `${name} ${status}`
       const candidate = [...boardLines, nextLine].join('\n')
 
@@ -472,7 +585,7 @@ async function initializeGlasses(): Promise<void> {
       return `${board}\n(!) data unavailable`
     }
 
-    const minutesOld = Math.max(1, Math.floor((Date.now() - lastGoodUpdateAt) / 60_000))
+    const minutesOld = Math.max(1, Math.floor((now() - lastGoodUpdateAt) / 60_000))
     return `${board}\n(!) data ${minutesOld} min old`
   }
 
@@ -531,7 +644,7 @@ async function initializeGlasses(): Promise<void> {
       }
 
       lastGoodBoard = board
-      lastGoodUpdateAt = Date.now()
+      lastGoodUpdateAt = now()
     } catch (error) {
       console.error('Unable to refresh TfL line status:', error)
 
@@ -568,6 +681,135 @@ async function initializeGlasses(): Promise<void> {
     clearInterval(refreshInterval)
     refreshInterval = undefined
     console.log('Status refresh interval paused')
+  }
+
+  function hasPendingLiveUpdate(): boolean {
+    return renderedAlertContent !== desiredAlertContent
+      || (
+        desiredBarContent !== undefined
+        && renderedBarContent !== desiredBarContent
+      )
+  }
+
+  function evaluateJourneyLiveState(): void {
+    if (!journeyState.active || journeyState.journey === null) {
+      stopJourneyTick()
+      return
+    }
+
+    const tickTime = now()
+    desiredAlertContent = currentAlertContainerContent(tickTime)
+    if (journeyState.hudHidden) {
+      desiredBarContent = undefined
+    } else {
+      const page = currentStagePage(tickTime)
+      desiredBarContent = page?.type === 'ride'
+        ? page.bottomBar.content
+        : undefined
+    }
+
+    liveUpdateQueued = hasPendingLiveUpdate()
+    void flushLiveUpdates()
+  }
+
+  function startJourneyTick(): void {
+    if (
+      journeyTickInterval !== undefined
+      || !journeyState.active
+    ) {
+      return
+    }
+
+    evaluateJourneyLiveState()
+    journeyTickInterval = setInterval(
+      evaluateJourneyLiveState,
+      JOURNEY_TICK_MS,
+    )
+    console.log('Journey live tick started')
+  }
+
+  function stopJourneyTick(): void {
+    if (journeyTickInterval === undefined) {
+      return
+    }
+
+    clearInterval(journeyTickInterval)
+    journeyTickInterval = undefined
+    liveUpdateQueued = false
+    console.log('Journey live tick stopped')
+  }
+
+  async function flushLiveUpdates(): Promise<void> {
+    if (
+      !liveUpdateQueued
+      || liveUpdateInFlight
+      || bridgeCallPending !== null
+      || journeyRenderQueued
+      || journeyRenderInFlight
+      || !journeyState.active
+    ) {
+      return
+    }
+
+    const isAlertUpdate = renderedAlertContent !== desiredAlertContent
+    const targetContent = isAlertUpdate
+      ? desiredAlertContent
+      : desiredBarContent
+    if (targetContent === undefined) {
+      liveUpdateQueued = false
+      return
+    }
+
+    const label = isAlertUpdate ? 'Journey alert update' : 'Live bar update'
+    const containerID = isAlertUpdate ? 8 : 6
+    const containerName = isAlertUpdate ? 'alert' : 'bar'
+    liveUpdateInFlight = true
+
+    const rawBridgeCall = startBridgeCall(
+      label,
+      () => bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID,
+          containerName,
+          content: targetContent,
+          contentOffset: 0,
+          contentLength: 0,
+        }),
+      ),
+    )
+    if (rawBridgeCall === undefined) {
+      liveUpdateInFlight = false
+      return
+    }
+
+    try {
+      const wasUpdated = await withBridgeTimeout(
+        rawBridgeCall,
+        `${containerName} textContainerUpgrade`,
+      )
+      if (!wasUpdated) {
+        console.error(`${label} failed`)
+        liveUpdateQueued = false
+        return
+      }
+
+      if (isAlertUpdate) {
+        renderedAlertContent = targetContent
+      } else {
+        renderedBarContent = targetContent
+      }
+    } catch (error) {
+      liveUpdateQueued = false
+      console.error(`Unable to send ${label.toLowerCase()}:`, error)
+      return
+    } finally {
+      liveUpdateInFlight = false
+    }
+
+    liveUpdateQueued = hasPendingLiveUpdate()
+    if (liveUpdateQueued) {
+      void flushLiveUpdates()
+    }
   }
 
   function cancelHiddenNoticeTimer(): void {
@@ -633,28 +875,39 @@ async function initializeGlasses(): Promise<void> {
   function requestJourneyRender(): void {
     cancelHiddenNoticeTimer()
     pauseRefreshInterval()
-    console.log('Status refresh paused for journey mode')
     journeyRenderQueued = true
+    startJourneyTick()
+    console.log('Status refresh paused for journey mode')
     void flushJourneyRender()
   }
 
   async function flushJourneyRender(): Promise<void> {
-    if (!journeyRenderQueued || bridgeCallPending !== null) {
+    if (
+      !journeyRenderQueued
+      || journeyRenderInFlight
+      || bridgeCallPending !== null
+    ) {
       return
     }
 
     const renderVersion = journeyStateVersion
+    const renderTime = now()
+    const renderAlertContent = currentAlertContainerContent(renderTime)
+    let renderBarContent: string | undefined
     let containers: TextContainerProperty[]
     try {
       if (journeyState.hudHidden) {
-        containers = createHiddenContainers()
+        containers = createHiddenContainers(renderAlertContent)
       } else {
-        const page = currentStagePage()
+        const page = currentStagePage(renderTime)
         if (page === undefined) {
           journeyRenderQueued = false
           return
         }
-        containers = createStageContainers(page)
+        renderBarContent = page.type === 'ride'
+          ? page.bottomBar.content
+          : undefined
+        containers = createStageContainers(page, renderAlertContent)
       }
     } catch (error) {
       journeyRenderQueued = false
@@ -662,6 +915,7 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
+    journeyRenderInFlight = true
     const rawBridgeCall = startBridgeCall(
       'Journey stage rebuild',
       () => bridge.rebuildPageContainer(
@@ -672,6 +926,7 @@ async function initializeGlasses(): Promise<void> {
       ),
     )
     if (rawBridgeCall === undefined) {
+      journeyRenderInFlight = false
       return
     }
 
@@ -680,14 +935,25 @@ async function initializeGlasses(): Promise<void> {
       const wasRebuilt = await withBridgeTimeout(rawBridgeCall, 'rebuildPageContainer')
       if (!wasRebuilt) {
         console.error('Journey stage rebuild failed')
-      } else if (
-        journeyState.hudHidden
-        && journeyStateVersion === renderVersion
-      ) {
-        scheduleHiddenNoticeClear()
+      } else {
+        renderedAlertContent = renderAlertContent
+        renderedBarContent = renderBarContent
+        if (
+          journeyState.hudHidden
+          && journeyStateVersion === renderVersion
+        ) {
+          scheduleHiddenNoticeClear()
+        }
       }
     } catch (error) {
       console.error('Unable to rebuild journey stage:', error)
+    } finally {
+      journeyRenderInFlight = false
+      if (journeyRenderQueued) {
+        void flushJourneyRender()
+      } else {
+        evaluateJourneyLiveState()
+      }
     }
   }
 
@@ -701,7 +967,12 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
-    if (bridgeCallPending !== null || journeyRenderQueued) {
+    if (
+      bridgeCallPending !== null
+      || journeyRenderQueued
+      || journeyRenderInFlight
+      || liveUpdateInFlight
+    ) {
       console.warn('Ignoring journey stage swipe while a bridge call is pending')
       return
     }
@@ -716,6 +987,7 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
+    dismissCurrentAlert()
     journeyState = { ...journeyState, stageIndex: nextIndex }
     journeyStateVersion += 1
     journeyRenderRequest?.()
@@ -775,6 +1047,9 @@ async function initializeGlasses(): Promise<void> {
   if (result === 0) {
     journeyRenderRequest = requestJourneyRender
     hudTimerCancelRequest = cancelHiddenNoticeTimer
+    journeyLiveResetRequest = () => {
+      dismissedAlertKeys.clear()
+    }
 
     const unsubscribe = bridge.onEvenHubEvent(event => {
       if (event.textEvent) {
@@ -820,14 +1095,17 @@ async function initializeGlasses(): Promise<void> {
           console.log(type === 6 ? 'Abnormal exit' : 'System exit')
           cancelHiddenNoticeTimer()
           pauseRefreshInterval()
+          stopJourneyTick()
           journeyRenderRequest = undefined
           hudTimerCancelRequest = undefined
+          journeyLiveResetRequest = undefined
           unsubscribe()
         }
       }
     })
 
     if (journeyState.active) {
+      startJourneyTick()
       if (startupJourneyVersion === journeyStateVersion) {
         pauseRefreshInterval()
         console.log('Status refresh paused for journey mode')
