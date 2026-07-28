@@ -270,6 +270,51 @@ Acceptance criteria:
 
 **Also for the record, a discovery while verifying the above:** the installed SDK exposes a location API (`getAppLocation(options?): Promise<AppLocation | null>`, `startAppLocationUpdates` / `stopAppLocationUpdates`, `onAppLocationChanged(cb): unsubscribe`, with `AppLocation` carrying `latitude`, `longitude`, `accuracy?`, `speed?`, `heading?`, `timestamp?` and an `AppLocationAccuracy` enum of Low/Medium/High). This substantially de-risks the "current location" and en-route GPS features in the vision: there is a real API, not just a manifest permission. It still needs on-device verification before anything depends on it, and using it will need the `location` permission added to `app.json`. Not tasked yet; M3/M4 material. Sol: do not touch this API in milestone 1.
 
+### 2026-07-28 — Milestone 2 round A: the TfL proxy (T4 for Sol, T5 for the lead)
+
+**Hosting decided:** Jack's existing droplet (`berrydev-apps`). The lead inspected it over SSH. Established pattern on that box, which we follow exactly: one shared Caddy instance (part of the `connect-remote` compose stack) owns ports 80/443 and terminates TLS for every app; each additional app is its own compose project whose container publishes no ports, joins the external docker network `connect-remote_default`, and gets a `reverse_proxy <container>:<port>` site block in the shared Caddyfile. The MatchHUD API already works this way. Deployment to the droplet is the lead's job (T5); Sol only writes the service (T4).
+
+---
+
+#### T4 — TfL proxy service
+
+A tiny standalone HTTP service in a new `proxy/` directory at repo root. This is plain Node, no EvenHub constraints apply. Keep it boring and auditable.
+
+Spec:
+
+- Node 22, TypeScript, **zero runtime dependencies** (use `node:http` and the built-in `fetch`). Own `package.json` in `proxy/` (scripts: `build` via tsc, `start` runs `dist/server.js`), own `tsconfig.json`. Do not touch the root app's package.json.
+- `GET /healthz` → `200 {"ok":true}`.
+- `GET /tfl/<path>?<query>` → forwards to `https://api.tfl.gov.uk/<path>?<query>` with `app_key=<TFL_APP_KEY>` appended server-side. Return the upstream status code and JSON body. Only `content-type` passes through from upstream headers.
+- **Path allowlist** (reject anything else with 404, before any upstream call): paths starting with `Journey/JourneyResults/`, `Line/Mode/`, `StopPoint/Search/`. This stops the service being an open proxy.
+- GET and OPTIONS only; other methods get 405.
+- **CORS:** every response carries `Access-Control-Allow-Origin: *`; OPTIONS preflight answers 204 with `Access-Control-Allow-Methods: GET` and `Access-Control-Allow-Headers: *`.
+- Upstream timeout 15 seconds → respond 504. Upstream network failure → 502.
+- **The key must never leak:** not in response bodies, not in response headers, not in error messages, not in logs. Log lines may include the path but must strip the query entirely (simplest rule that cannot go wrong).
+- Env: `TFL_APP_KEY` (required; exit nonzero with a clear message at startup if unset), `PORT` (default 8100).
+- `proxy/Dockerfile`: `node:22-alpine`, install, build, run `dist/server.js`.
+- `proxy/docker-compose.yml`: one service named `transit-proxy`, `restart: unless-stopped`, **no `ports:` published**, `env_file: .env`, and joined to the external network `connect-remote_default` (declare it `external: true`). This mirrors how MatchHUD sits behind the shared Caddy.
+- For local testing, load the real key into your shell from the repo root `.env` (`set -a; source ../.env` from `proxy/`). Do not copy the key into any file.
+
+Acceptance criteria:
+
+- `npm run build` in `proxy/` passes.
+- With the key exported: `curl localhost:8100/healthz` returns `{"ok":true}`; `curl 'localhost:8100/tfl/Line/Mode/tube/Status'` returns the same JSON array shape the client already consumes; `curl 'localhost:8100/tfl/Journey/JourneyResults/HUBKGX/to/940GZZLUBXN'` returns journeys.
+- `curl 'localhost:8100/tfl/Line/1'` (not allowlisted) returns 404 without hitting TfL; `curl -X POST` anything returns 405.
+- Responses carry `Access-Control-Allow-Origin: *`.
+- Grep proof: `TFL_APP_KEY` appears only in env reading and the outbound URL construction; no log statement includes a query string.
+- `docker build proxy/` succeeds.
+- No changes outside `proxy/` (the client's `API_BASE` swap is a later task, after the lead deploys).
+
+---
+
+#### T5 — Deploy the proxy (lead's job, after T4 review)
+
+DNS record for the chosen subdomain, site block in the shared Caddyfile, `.env` with the key on the droplet, compose up, end-to-end verify over HTTPS, then task the client `API_BASE` swap. Blocked on the subdomain decision (see Open questions).
+
+---
+
+**Round B preview (phone-side planning UI, tasked after round A):** station search box hitting `/tfl/StopPoint/Search/{query}?modes=tube,elizabeth-line,dlr,overground,bus` (verified live: returns `matches[]` with `id`, `name`, `modes[]`; hub ids like `HUBKGX` work directly as journey endpoints), from/to selection, now/later/arrive-by, fastest and cheapest cards with per-mode identifiers, and a Go button that hands over to the glasses.
+
 ---
 
 ---
@@ -353,6 +398,7 @@ Simulator verification by the lead (Sol's blocker resolved):
 4. **Line ordering.** Alphabetical, or severity-first (disrupted lines at the top)? I have left it unspecified for milestone 1; Sol will get an explicit instruction in review if it matters to you.
 5. **Phone-side planning UI.** I have assumed journey setup (station search, timing choice) happens on the phone screen and the glasses take over at Go, because glasses text entry is not workable. Shout if you pictured glasses-only.
 6. **Options screen location.** Should the fastest/cheapest comparison show on the glasses, the phone, or both? I have assumed both (choose on either), but phone-only would simplify the glasses UI.
+7. **Proxy subdomain (blocks T5, not T4).** I suggest `transit.berrydev.co.uk`. If you are happy with it, add a DNS A record pointing it at the droplet's IP (same target as car-proxy.berrydev.co.uk) and tell me when it is in; I will do the rest. If you would rather a different name, just say which.
 
 ## Jacks answers
 
