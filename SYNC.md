@@ -578,6 +578,10 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** Time-derived state, cross-layout alert plumbing and careful update discipline.
 
+### 2026-07-28 — Queued, not yet tasked: phone UI restyle
+
+Jack likes the phone app's polish but it is not his vibe. A visual revision round is queued, **blocked on Jack providing reference examples** (apps or sites whose look he wants, plus specific dislikes about the current design). The lead will translate the examples into a concrete restyle spec for Sol once they arrive. Functionality, markup structure and accessibility are to be preserved; this is a skin, not a rebuild.
+
 ---
 
 ---
@@ -721,6 +725,16 @@ Effort recommendation for Jack: **high.** Time-derived state, cross-layout alert
 - **Implementation:** Swapped the measured arrival and route-summary slots. `Arrive <HH:MM>` now occupies the padded left position, the route summary is the centred item, and `Stage N of M` remains right. The existing space-between calculation still divides the remaining width equally between both internal gaps and truncates safely when needed.
 - **Verification:** Root and proxy builds pass; `git diff --check` and standing safety greps pass. Simulator startup returned 0 with no page errors and visually confirmed `Arrive 18:08` left, `Victoria line to Brixton` centred, and `Stage 1 of 2` right. The approved three-row bottom band is unchanged.
 - **Scope/questions:** No SDK behaviour, journey logic, walk layout, persistence, input handling, round E work, deployment, commit, or push was added. No questions arose.
+
+**2026-07-28 — T12 live position and stop alerts**
+
+- **Clock and lifecycle:** Added one `now()` indirection for every current-time read and a development-only `dev-clock` offset configured before phone/journey initialisation. Journey mode now owns a one-second live tick that recomputes from the journey JSON and clock, starts only for an active journey, continues across foreground exit, and stops on system/abnormal exit or when no journey remains.
+- **Live bar:** Reworked the fixed 520px bar so passed stop markers fill from interpolated segment ETAs while future markers remain hollow. Long legs retain a proportional, evenly sampled marker set and invariant glyph width. A ride before departure is completely hollow, including its first endpoint; a completed ride is completely filled. Content-only updates target the exact `bar` identity (`ID 6`, name `bar`) and are queued only when the rendered string changes.
+- **Alerts and layouts:** Added the always-present borderless `alert` container (`x:88 y:166 w:400 h:27`, `ID 8`, name `alert`) to ride, walk/top, arrive, and hidden layouts, using the required single space while inactive. Ride pages now use exactly eight text containers and every layout still has exactly one event-capturing container. The penultimate-stop calculation shows `Next stop: <arrival name>` for up to ten seconds; the T-30 window shows `This is your stop` with precedence, clears at arrival, and is dismissed on a stage change.
+- **Serialisation:** Alert and bar upgrades use `TextContainerUpgrade` inside the existing raw-promise bridge gate. Exit, rebuild, live upgrade, and hidden-notice work retain explicit priority; rebuild completion refreshes rendered live state before another update is considered, preventing stale or concurrent sends.
+- **Decisions beyond the literal spec:** Because alert changes must be content-only, the alert container stays at a fixed centred 400px position and the measured line is centred within it using measured leading-space width. The live TfL journey returned slightly different departure choices between repeated requests during time-offset testing, so simulator launches calculated offsets immediately before launch; no production logic depends on that test technique.
+- **Verification:** Root and proxy builds pass and `git diff --check` passes. The production bundle contains neither `dev-journey` nor `dev-clock`; standing storage, key, origin, event-elision, startup-count, and route-glyph checks remain clean. Simulator startup returned 0 without errors. Screenshots verified a partial current-leg bar, `Next stop: Brixton Underground Station`, its ten-second clear, centred `This is your stop`, the alert retained on the hidden HUD, stage-change clearing, a completely hollow future London Bridge-to-Canary Wharf leg, and the partial current leg restored on swipe back. Arrival produced one alert-clear upgrade and one final bar upgrade. Console evidence showed bar/alert upgrades only at content transitions and every rebuild/upgrade entering the serialised bridge gate.
+- **Could not verify / questions:** The simulator cannot verify continued ticking during the real phone background migration or final rendering on G2 hardware; those remain for lead/hardware verification. No SDK question arose, and no SDK documentation was consulted. No deployment, commit, or push was performed.
 
 ---
 
