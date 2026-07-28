@@ -1,5 +1,5 @@
 {
-  "package_id": "com.jackberry.londontransithud",
+  "package_id": "com.beriscope.londontransithud",
   "edition": "202601",
   "name": "London Transit HUD",
   "version": "0.1.0",
@@ -9,8 +9,11 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Fetches live journey and line status data via the app's TfL proxy",
-      "whitelist": ["https://transit.berrydev.co.uk"]
+      "desc": "Connects to the app's own service (transit.berrydev.co.uk) to fetch live Transport for London journey plans, line status and fares, and to search stations and places. Searches are forwarded to TfL and OpenStreetMap without being logged or stored; the app has no accounts and sends no personal data.",
+      "whitelist": [
+        "https://transit.berrydev.co.uk",
+        "transit.berrydev.co.uk"
+      ]
     }
   ],
   "supported_languages": ["en"]
