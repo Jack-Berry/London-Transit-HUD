@@ -3,9 +3,151 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#091411" />
+    <meta
+      name="description"
+      content="Plan the fastest or cheapest journey across London's trains and buses."
+    />
     <title>London Transit HUD</title>
   </head>
   <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="eyebrow">London Transit HUD</p>
+        <h1>Your route, without the scramble.</h1>
+        <p class="hero-copy">
+          Compare the fastest and cheapest ways across London, then send your
+          chosen journey to your glasses.
+        </p>
+      </header>
+
+      <section class="planner-panel" aria-labelledby="planner-title">
+        <div class="section-heading">
+          <div>
+            <p class="step-label">Plan a journey</p>
+            <h2 id="planner-title">Where are you going?</h2>
+          </div>
+          <span class="network-status">
+            <span aria-hidden="true"></span>
+            TfL live
+          </span>
+        </div>
+
+        <form id="journey-form" novalidate>
+          <div class="route-fields">
+            <div class="route-line" aria-hidden="true">
+              <span class="route-dot route-dot--from"></span>
+              <span class="route-stem"></span>
+              <span class="route-dot route-dot--to"></span>
+            </div>
+
+            <div class="field-stack">
+              <div class="station-field">
+                <label for="from-input">From</label>
+                <div class="input-shell">
+                  <input
+                    id="from-input"
+                    type="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Search station or stop"
+                    aria-autocomplete="list"
+                    aria-controls="from-suggestions"
+                    aria-expanded="false"
+                  />
+                  <span class="input-state" aria-hidden="true"></span>
+                </div>
+                <div
+                  id="from-suggestions"
+                  class="suggestions"
+                  role="listbox"
+                  aria-label="From suggestions"
+                  hidden
+                ></div>
+                <p id="from-error" class="field-message" role="status"></p>
+              </div>
+
+              <div class="station-field">
+                <label for="to-input">To</label>
+                <div class="input-shell">
+                  <input
+                    id="to-input"
+                    type="search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Search station or stop"
+                    aria-autocomplete="list"
+                    aria-controls="to-suggestions"
+                    aria-expanded="false"
+                  />
+                  <span class="input-state" aria-hidden="true"></span>
+                </div>
+                <div
+                  id="to-suggestions"
+                  class="suggestions"
+                  role="listbox"
+                  aria-label="To suggestions"
+                  hidden
+                ></div>
+                <p id="to-error" class="field-message" role="status"></p>
+              </div>
+            </div>
+          </div>
+
+          <fieldset class="timing-fieldset">
+            <legend>When?</legend>
+            <div class="segmented-control">
+              <label>
+                <input type="radio" name="timing" value="now" checked />
+                <span>Now</span>
+              </label>
+              <label>
+                <input type="radio" name="timing" value="departing" />
+                <span>Leave at</span>
+              </label>
+              <label>
+                <input type="radio" name="timing" value="arriving" />
+                <span>Arrive by</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="datetime-field" class="datetime-field" hidden>
+            <label for="journey-datetime">Date and time</label>
+            <input id="journey-datetime" type="datetime-local" />
+          </div>
+
+          <p id="planner-error" class="planner-message" role="alert"></p>
+
+          <button id="plan-button" class="primary-action" type="submit">
+            <span>Compare routes</span>
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="results-section" class="results-section" aria-labelledby="results-title" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="step-label">Your options</p>
+            <h2 id="results-title">Choose your journey</h2>
+          </div>
+        </div>
+        <div id="journey-results" class="journey-results"></div>
+      </section>
+
+      <footer class="phone-footer">
+        <span>Powered by TfL live data</span>
+        <span class="footer-separator" aria-hidden="true"></span>
+        <span>Glasses handoff coming next</span>
+      </footer>
+    </main>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
