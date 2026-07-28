@@ -360,6 +360,21 @@ input[data-selected="true"] + .input-state {
   background: rgba(115, 224, 174, 0.08);
 }
 
+.suggestion-heading {
+  margin: 4px 11px 3px;
+  color: #6f8d80;
+  font-size: 0.61rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.suggestion-heading:not(:first-child) {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .suggestion-name {
   overflow: hidden;
   color: #ecf8f1;
@@ -367,6 +382,38 @@ input[data-selected="true"] + .input-state {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.suggestion-option--place {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.place-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.place-secondary {
+  overflow: hidden;
+  color: #779087;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place-type {
+  align-self: center;
+  padding: 4px 7px;
+  border: 1px solid rgba(214, 240, 107, 0.2);
+  border-radius: 999px;
+  color: #dceca1;
+  background: rgba(214, 240, 107, 0.07);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
 }
 
 .suggestion-empty {

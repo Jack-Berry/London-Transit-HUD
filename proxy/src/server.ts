@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http'
 
 const UPSTREAM_ORIGIN = 'https://api.tfl.gov.uk'
+const GEOCODE_ORIGIN = 'https://photon.komoot.io'
 const UPSTREAM_TIMEOUT_MS = 15_000
 const DEFAULT_PORT = 8100
 const ALLOWED_PATH_PREFIXES = [
@@ -59,6 +60,45 @@ function redactKey(body: string): string {
   return body.replaceAll(appKey, '[redacted]')
 }
 
+async function forwardJson(
+  response: ServerResponse,
+  method: string,
+  path: string,
+  upstreamUrl: URL,
+): Promise<void> {
+  const abortController = new AbortController()
+  const timeout = setTimeout(() => abortController.abort(), UPSTREAM_TIMEOUT_MS)
+
+  try {
+    const upstreamResponse = await fetch(upstreamUrl, {
+      method: 'GET',
+      signal: abortController.signal,
+    })
+    const upstreamBody = redactKey(await upstreamResponse.text())
+
+    setCorsHeaders(response)
+    response.statusCode = upstreamResponse.status
+
+    const contentType = upstreamResponse.headers.get('content-type')
+    if (contentType !== null) {
+      response.setHeader('content-type', contentType)
+    }
+
+    response.end(upstreamBody)
+    logRequest(method, path, upstreamResponse.status)
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      sendJson(response, 504, { error: 'Upstream timeout' })
+      logRequest(method, path, 504)
+    } else {
+      sendJson(response, 502, { error: 'Upstream unavailable' })
+      logRequest(method, path, 502)
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 const server = createServer(async (request, response) => {
   const method = request.method ?? 'GET'
   let requestUrl: URL
@@ -95,6 +135,23 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (path === '/geocode') {
+    const query = requestUrl.searchParams.get('q')?.trim()
+    if (!query) {
+      sendJson(response, 400, { error: 'Search query is required' })
+      logRequest(method, path, 400)
+      return
+    }
+
+    const geocodeUrl = new URL('/api/', GEOCODE_ORIGIN)
+    geocodeUrl.searchParams.set('q', query)
+    geocodeUrl.searchParams.set('limit', '6')
+    geocodeUrl.searchParams.set('lat', '51.5074')
+    geocodeUrl.searchParams.set('lon', '-0.1278')
+    await forwardJson(response, method, path, geocodeUrl)
+    return
+  }
+
   if (!path.startsWith('/tfl/')) {
     sendJson(response, 404, { error: 'Not found' })
     logRequest(method, path, 404)
@@ -116,37 +173,7 @@ const server = createServer(async (request, response) => {
   })
   upstreamUrl.searchParams.set('app_key', appKey)
 
-  const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), UPSTREAM_TIMEOUT_MS)
-
-  try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: 'GET',
-      signal: abortController.signal,
-    })
-    const upstreamBody = redactKey(await upstreamResponse.text())
-
-    setCorsHeaders(response)
-    response.statusCode = upstreamResponse.status
-
-    const contentType = upstreamResponse.headers.get('content-type')
-    if (contentType !== null) {
-      response.setHeader('content-type', contentType)
-    }
-
-    response.end(upstreamBody)
-    logRequest(method, path, upstreamResponse.status)
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      sendJson(response, 504, { error: 'Upstream timeout' })
-      logRequest(method, path, 504)
-    } else {
-      sendJson(response, 502, { error: 'Upstream unavailable' })
-      logRequest(method, path, 502)
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
+  await forwardJson(response, method, path, upstreamUrl)
 })
 
 server.listen(port, () => {

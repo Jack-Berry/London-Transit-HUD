@@ -12,6 +12,45 @@ interface StationSearchResponse {
   matches?: StationMatch[]
 }
 
+interface PhotonFeature {
+  geometry?: {
+    coordinates?: unknown
+  }
+  properties?: {
+    name?: unknown
+    osm_value?: unknown
+    street?: unknown
+    postcode?: unknown
+    city?: unknown
+  }
+}
+
+interface PhotonResponse {
+  features?: PhotonFeature[]
+}
+
+interface PlaceMatch {
+  name: string
+  lat: number
+  lon: number
+  osmValue: string
+  secondary: string
+}
+
+type JourneySelection =
+  | {
+    kind: 'stop'
+    name: string
+    endpoint: string
+    match: StationMatch
+  }
+  | {
+    kind: 'place'
+    name: string
+    endpoint: string
+    place: PlaceMatch
+  }
+
 interface JourneyLeg {
   mode?: {
     name?: string
@@ -42,7 +81,7 @@ interface StationControl {
   input: HTMLInputElement
   suggestions: HTMLElement
   error: HTMLElement
-  selected?: StationMatch
+  selected?: JourneySelection
   debounce?: ReturnType<typeof setTimeout>
   abortController?: AbortController
 }
@@ -52,6 +91,7 @@ class StopIdentificationError extends Error {}
 const SEARCH_DEBOUNCE_MS = 300
 const SEARCH_MODES = 'tube,elizabeth-line,dlr,overground,bus'
 const SEARCH_RESULT_LIMIT = 8
+const PLACE_RESULT_LIMIT = 5
 const timeFormatter = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit',
   minute: '2-digit',
@@ -154,12 +194,12 @@ function bindStationSearch(control: StationControl, apiBase: string): void {
 
     control.input.parentElement?.classList.add('is-loading')
     control.debounce = setTimeout(() => {
-      void searchStations(control, query, apiBase)
+      void searchDestinations(control, query, apiBase)
     }, SEARCH_DEBOUNCE_MS)
   })
 }
 
-async function searchStations(
+async function searchDestinations(
   control: StationControl,
   query: string,
   apiBase: string,
@@ -168,37 +208,105 @@ async function searchStations(
   control.abortController = abortController
 
   try {
-    const response = await fetch(
-      `${apiBase}/StopPoint/Search/${encodeURIComponent(query)}?modes=${SEARCH_MODES}`,
-      { signal: abortController.signal },
-    )
-    if (!response.ok) {
-      throw new Error(`Station search failed with HTTP ${response.status}`)
-    }
+    const [stopsResult, placesResult] = await Promise.allSettled([
+      fetchStationMatches(query, apiBase, abortController.signal),
+      fetchPlaceMatches(query, apiBase, abortController.signal),
+    ])
 
-    const data = await response.json() as StationSearchResponse
-    const matches = Array.isArray(data.matches)
-      ? data.matches.filter(isStationMatch).slice(0, SEARCH_RESULT_LIMIT)
-      : []
+    if (abortController.signal.aborted) {
+      return
+    }
 
     if (control.input.value.trim() !== query) {
       return
     }
 
-    renderSuggestions(control, matches)
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (stopsResult.status === 'rejected' && placesResult.status === 'rejected') {
+      hideSuggestions(control)
+      control.error.textContent = 'Search is unavailable. Try again.'
       return
     }
 
-    hideSuggestions(control)
-    control.error.textContent = 'Station search is unavailable. Try again.'
+    const stops = stopsResult.status === 'fulfilled' ? stopsResult.value : []
+    const places = placesResult.status === 'fulfilled' ? placesResult.value : []
+    renderSuggestions(control, stops, places)
   } finally {
     if (control.abortController === abortController) {
       control.abortController = undefined
       control.input.parentElement?.classList.remove('is-loading')
     }
   }
+}
+
+async function fetchStationMatches(
+  query: string,
+  apiBase: string,
+  signal: AbortSignal,
+): Promise<StationMatch[]> {
+  const response = await fetch(
+    `${apiBase}/StopPoint/Search/${encodeURIComponent(query)}?modes=${SEARCH_MODES}`,
+    { signal },
+  )
+  if (!response.ok) {
+    throw new Error(`Station search failed with HTTP ${response.status}`)
+  }
+
+  const data = await response.json() as StationSearchResponse
+  return Array.isArray(data.matches)
+    ? data.matches.filter(isStationMatch).slice(0, SEARCH_RESULT_LIMIT)
+    : []
+}
+
+async function fetchPlaceMatches(
+  query: string,
+  apiBase: string,
+  signal: AbortSignal,
+): Promise<PlaceMatch[]> {
+  const geocodeUrl = new URL('/geocode', apiBase)
+  geocodeUrl.searchParams.set('q', query)
+
+  const response = await fetch(geocodeUrl, { signal })
+  if (!response.ok) {
+    throw new Error(`Place search failed with HTTP ${response.status}`)
+  }
+
+  const data = await response.json() as PhotonResponse
+  return Array.isArray(data.features)
+    ? data.features.map(toPlaceMatch).filter(isPresent).slice(0, PLACE_RESULT_LIMIT)
+    : []
+}
+
+function toPlaceMatch(feature: PhotonFeature): PlaceMatch | undefined {
+  const coordinates = feature.geometry?.coordinates
+  const properties = feature.properties
+  if (
+    !Array.isArray(coordinates)
+    || typeof coordinates[0] !== 'number'
+    || !Number.isFinite(coordinates[0])
+    || typeof coordinates[1] !== 'number'
+    || !Number.isFinite(coordinates[1])
+    || typeof properties?.name !== 'string'
+    || properties.name.trim() === ''
+  ) {
+    return undefined
+  }
+
+  const [lon, lat] = coordinates
+  const street = typeof properties.street === 'string' ? properties.street : ''
+  const postcode = typeof properties.postcode === 'string' ? properties.postcode : ''
+  const city = typeof properties.city === 'string' ? properties.city : ''
+
+  return {
+    name: properties.name,
+    lat,
+    lon,
+    osmValue: typeof properties.osm_value === 'string' ? properties.osm_value : 'place',
+    secondary: [street, postcode || city].filter(Boolean).join(' · '),
+  }
+}
+
+function isPresent<T>(value: T | undefined): value is T {
+  return value !== undefined
 }
 
 function isStationMatch(value: unknown): value is StationMatch {
@@ -214,34 +322,31 @@ function isStationMatch(value: unknown): value is StationMatch {
     && Array.isArray(candidate.modes)
 }
 
-function renderSuggestions(control: StationControl, matches: StationMatch[]): void {
+function renderSuggestions(
+  control: StationControl,
+  stops: StationMatch[],
+  places: PlaceMatch[],
+): void {
   control.suggestions.replaceChildren()
 
-  if (matches.length === 0) {
+  if (stops.length === 0 && places.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'suggestion-empty'
-    empty.textContent = 'No matching stops found'
+    empty.textContent = 'No matching stops or places found'
     control.suggestions.append(empty)
-  } else {
-    for (const match of matches) {
-      const option = document.createElement('button')
-      option.type = 'button'
-      option.className = 'suggestion-option'
-      option.setAttribute('role', 'option')
+  }
 
-      const name = document.createElement('span')
-      name.className = 'suggestion-name'
-      name.textContent = match.name
+  if (stops.length > 0) {
+    control.suggestions.append(createSuggestionHeading('Stations & stops'))
+    for (const match of stops) {
+      control.suggestions.append(createStopOption(control, match))
+    }
+  }
 
-      const chips = document.createElement('span')
-      chips.className = 'mode-list mode-list--compact'
-      for (const mode of uniqueModes(match.modes)) {
-        chips.append(createModeChip(mode))
-      }
-
-      option.append(name, chips)
-      option.addEventListener('click', () => selectStation(control, match))
-      control.suggestions.append(option)
+  if (places.length > 0) {
+    control.suggestions.append(createSuggestionHeading('Places'))
+    for (const place of places) {
+      control.suggestions.append(createPlaceOption(control, place))
     }
   }
 
@@ -249,9 +354,79 @@ function renderSuggestions(control: StationControl, matches: StationMatch[]): vo
   control.input.setAttribute('aria-expanded', 'true')
 }
 
-function selectStation(control: StationControl, match: StationMatch): void {
-  control.selected = match
-  control.input.value = match.name
+function createSuggestionHeading(label: string): HTMLElement {
+  const heading = document.createElement('p')
+  heading.className = 'suggestion-heading'
+  heading.textContent = label
+  return heading
+}
+
+function createStopOption(control: StationControl, match: StationMatch): HTMLElement {
+  const option = document.createElement('button')
+  option.type = 'button'
+  option.className = 'suggestion-option'
+  option.setAttribute('role', 'option')
+
+  const name = document.createElement('span')
+  name.className = 'suggestion-name'
+  name.textContent = match.name
+
+  const chips = document.createElement('span')
+  chips.className = 'mode-list mode-list--compact'
+  for (const mode of uniqueModes(match.modes)) {
+    chips.append(createModeChip(mode))
+  }
+
+  option.append(name, chips)
+  option.addEventListener('click', () => {
+    selectDestination(control, {
+      kind: 'stop',
+      name: match.name,
+      endpoint: match.icsId,
+      match,
+    })
+  })
+  return option
+}
+
+function createPlaceOption(control: StationControl, place: PlaceMatch): HTMLElement {
+  const option = document.createElement('button')
+  option.type = 'button'
+  option.className = 'suggestion-option suggestion-option--place'
+  option.setAttribute('role', 'option')
+
+  const copy = document.createElement('span')
+  copy.className = 'place-copy'
+
+  const name = document.createElement('span')
+  name.className = 'suggestion-name'
+  name.textContent = place.name
+
+  const secondary = document.createElement('span')
+  secondary.className = 'place-secondary'
+  secondary.textContent = place.secondary
+  secondary.hidden = place.secondary === ''
+
+  const type = document.createElement('span')
+  type.className = 'place-type'
+  type.textContent = place.osmValue
+
+  copy.append(name, secondary)
+  option.append(copy, type)
+  option.addEventListener('click', () => {
+    selectDestination(control, {
+      kind: 'place',
+      name: place.name,
+      endpoint: `${place.lat},${place.lon}`,
+      place,
+    })
+  })
+  return option
+}
+
+function selectDestination(control: StationControl, selection: JourneySelection): void {
+  control.selected = selection
+  control.input.value = selection.name
   control.input.dataset.selected = 'true'
   control.input.setAttribute('aria-invalid', 'false')
   control.error.textContent = ''
@@ -317,8 +492,8 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
 
   const timingParams = buildTimingParams(timing, datetimeInput.value)
   const journeyPath = `${apiBase}/Journey/JourneyResults/${
-    encodeURIComponent(fromControl.selected.icsId)
-  }/to/${encodeURIComponent(toControl.selected.icsId)}`
+    encodeURIComponent(fromControl.selected.endpoint)
+  }/to/${encodeURIComponent(toControl.selected.endpoint)}`
   const defaultUrl = withQuery(journeyPath, timingParams)
   const busParams = new URLSearchParams(timingParams)
   busParams.set('mode', 'bus')
