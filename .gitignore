@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Secrets — .env holds the TfL app key, server-side only
+.env
+.env.*
+!.env.example

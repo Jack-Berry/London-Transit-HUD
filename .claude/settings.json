@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD log --oneline -10)",
+      "Bash(curl -s --max-time 15 \"https://api.tfl.gov.uk/Journey/JourneyResults/940GZZLUKSX/to/940GZZLUBXN\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s --max-time 15 \"https://api.tfl.gov.uk/Journey/JourneyResults/940GZZLUKSX/to/940GZZLUBXN?timeIs=Arriving&time=1800&date=20260728\")",
+      "Bash(curl -s --max-time 15 \"https://api.tfl.gov.uk/Journey/JourneyResults/940GZZLUKSX/to/940GZZLUBXN?mode=bus\")",
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD status --short)",
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD remote -v)",
+      "Bash(git -C /Users/jackberry/Code/Projects/London-Transit-HUD config user.email)"
+    ]
+  }
+}
