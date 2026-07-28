@@ -3,7 +3,7 @@ import type { Journey, JourneyLeg } from './phone'
 
 const INNER_WIDTH = 568
 const NAME_WIDTH = 240
-const FOOTER = 'Swipe: stages   2x tap: exit'
+const STAGE_ZERO_HINT = 'Swipe: stages   Tap: hide   2x: exit'
 
 export type JourneyStage =
   | {
@@ -19,9 +19,8 @@ export type JourneyStage =
   }
 
 export interface StagePageContent {
-  header: string
-  body: string
-  footer: string
+  top: string
+  bottom?: string
 }
 
 export function deriveJourneyStages(journey: Journey): JourneyStage[] {
@@ -42,13 +41,11 @@ export function buildStagePage(
   stageTotal: number,
 ): StagePageContent {
   if (stage.type === 'walk') {
-    return buildWalkPage(stage.leg)
+    return buildWalkPage(stage.leg, stageIndex, stageTotal)
   }
   if (stage.type === 'arrive') {
     return {
-      header: '',
-      body: fitLine('Walk to your destination', INNER_WIDTH),
-      footer: FOOTER,
+      top: fitLine('Walk to your destination', INNER_WIDTH),
     }
   }
 
@@ -65,42 +62,58 @@ function buildRidePage(
     ?? leg.mode?.name
     ?? 'Journey stage'
   const duration = leg.duration ?? 0
-  const stageLine = `Stage ${stageIndex + 1} of ${stageTotal} · ${duration} min`
-  const header = [
-    fitLine(summary, INNER_WIDTH),
-    fitLine(stageLine, INNER_WIDTH),
-  ].join('\n')
-
   const departure = fitLine(leg.departurePoint?.commonName ?? 'Departure', NAME_WIDTH)
   const arrival = fitLine(leg.arrivalPoint?.commonName ?? 'Arrival', NAME_WIDTH)
   const names = fitNamesLine(departure, arrival)
   const stopPoints = leg.path?.stopPoints ?? []
   const intermediateStopCount = Math.max(0, stopPoints.length - 1)
   const bar = buildMeasuredBar(intermediateStopCount)
-  const detail = fitLine(
-    `${stopPoints.length} stops · arrive ${formatTime(leg.arrivalTime)}`,
-    INNER_WIDTH,
-  )
+  const stopCount = `${stopPoints.length} stops`
+  const barWithStopCount = `${bar} · ${stopCount}`
+  const barLine = isSingleLine(barWithStopCount, INNER_WIDTH)
+    ? barWithStopCount
+    : bar
+  const detail = [
+    `Stage ${stageIndex + 1} of ${stageTotal}`,
+    `${duration} min`,
+    `arrive ${formatTime(leg.arrivalTime)}`,
+    ...(barLine === bar ? [stopCount] : []),
+  ].join(' · ')
+  const topLines = [
+    fitLine(summary, INNER_WIDTH),
+    fitLine(detail, INNER_WIDTH),
+  ]
+  if (stageIndex === 0) {
+    topLines.push(fitLine(STAGE_ZERO_HINT, INNER_WIDTH))
+  }
 
   return {
-    header,
-    body: [names, bar, detail].join('\n'),
-    footer: FOOTER,
+    top: topLines.join('\n'),
+    bottom: [names, barLine].join('\n'),
   }
 }
 
-function buildWalkPage(leg: JourneyLeg): StagePageContent {
+function buildWalkPage(
+  leg: JourneyLeg,
+  stageIndex: number,
+  stageTotal: number,
+): StagePageContent {
   const summary = leg.instruction?.summary
     ?? `Walk to ${leg.arrivalPoint?.commonName ?? 'your next stop'}`
   const duration = leg.duration ?? 0
+  const topLines = [
+    fitLine(summary, INNER_WIDTH),
+    fitLine(
+      `about ${duration} min · Stage ${stageIndex + 1} of ${stageTotal}`,
+      INNER_WIDTH,
+    ),
+  ]
+  if (stageIndex === 0) {
+    topLines.push(fitLine(STAGE_ZERO_HINT, INNER_WIDTH))
+  }
 
   return {
-    header: fitLine('Walk', INNER_WIDTH),
-    body: [
-      fitLine(summary, INNER_WIDTH),
-      fitLine(`about ${duration} min`, INNER_WIDTH),
-    ].join('\n'),
-    footer: FOOTER,
+    top: topLines.join('\n'),
   }
 }
 

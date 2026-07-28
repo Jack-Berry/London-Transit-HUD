@@ -25,6 +25,7 @@ export const API_BASE = 'https://transit.berrydev.co.uk/tfl'
 const STATUS_PATH = '/Line/Mode/tube,elizabeth-line,dlr,overground/Status'
 const REFRESH_INTERVAL_MS = 60_000
 const BRIDGE_TIMEOUT_MS = 5_000
+const HIDDEN_NOTICE_MS = 5_000
 const MAX_BOARD_CHARACTERS = 475
 const LINE_NAME_WIDTH = 13
 
@@ -39,6 +40,7 @@ interface JourneyState {
   active: boolean
   journey: Journey | null
   stageIndex: number
+  hudHidden: boolean
 }
 
 class BridgeTimeoutError extends Error {}
@@ -47,9 +49,11 @@ let journeyState: JourneyState = {
   active: false,
   journey: null,
   stageIndex: 0,
+  hudHidden: false,
 }
 let journeyStateVersion = 0
 let journeyRenderRequest: (() => void) | undefined
+let hudTimerCancelRequest: (() => void) | undefined
 
 function restoreJourneyState(saved: unknown): void {
   if (saved === null || typeof saved !== 'object') {
@@ -61,8 +65,10 @@ function restoreJourneyState(saved: unknown): void {
     active: s.active ?? journeyState.active,
     journey: s.journey ?? journeyState.journey,
     stageIndex: s.stageIndex ?? journeyState.stageIndex,
+    hudHidden: s.hudHidden ?? journeyState.hudHidden,
   }
   journeyStateVersion += 1
+  hudTimerCancelRequest?.()
 
   if (journeyState.active) {
     journeyRenderRequest?.()
@@ -70,7 +76,10 @@ function restoreJourneyState(saved: unknown): void {
 }
 
 window.__getStateSnapshot = () => JSON.stringify({
-  journeyMode: { ...journeyState },
+  journeyMode: {
+    ...journeyState,
+    hudHidden: journeyState.hudHidden,
+  },
 })
 
 window.__restoreState = snapshot => {
@@ -105,6 +114,7 @@ function enterJourneyMode(journey: Journey): void {
     active: true,
     journey,
     stageIndex: 0,
+    hudHidden: false,
   }
   journeyStateVersion += 1
   console.log('Journey handoff')
@@ -199,76 +209,56 @@ function createStatusContainers(): TextContainerProperty[] {
 }
 
 function createStageContainers(page: StagePageContent): TextContainerProperty[] {
-  if (page.header === '') {
-    return [
-      new TextContainerProperty({
-        xPosition: 0,
-        yPosition: 0,
-        width: 576,
-        height: 252,
-        borderWidth: 0,
-        borderColor: 5,
-        paddingLength: 4,
-        containerID: 1,
-        containerName: 'stage',
-        content: page.body,
-        isEventCapture: 1,
-      }),
-      new TextContainerProperty({
-        xPosition: 0,
-        yPosition: 252,
-        width: 576,
-        height: 36,
-        borderWidth: 0,
-        borderColor: 5,
-        paddingLength: 4,
-        containerID: 2,
-        containerName: 'footer',
-        content: page.footer,
-        isEventCapture: 0,
-      }),
-    ]
-  }
-
-  return [
+  const topLineCount = page.top.split('\n').length
+  const containers = [
     new TextContainerProperty({
       xPosition: 0,
       yPosition: 0,
       width: 576,
-      height: 54,
+      height: topLineCount * 27,
       borderWidth: 0,
       borderColor: 5,
       paddingLength: 0,
       containerID: 1,
       containerName: 'header',
-      content: page.header,
-      isEventCapture: 0,
-    }),
-    new TextContainerProperty({
-      xPosition: 0,
-      yPosition: 54,
-      width: 576,
-      height: 198,
-      borderWidth: 0,
-      borderColor: 5,
-      paddingLength: 4,
-      containerID: 2,
-      containerName: 'stage',
-      content: page.body,
+      content: page.top,
       isEventCapture: 1,
     }),
-    new TextContainerProperty({
+  ]
+
+  if (page.bottom !== undefined) {
+    containers.push(new TextContainerProperty({
       xPosition: 0,
-      yPosition: 252,
+      yPosition: 234,
       width: 576,
-      height: 36,
+      height: 54,
       borderWidth: 0,
       borderColor: 5,
-      paddingLength: 4,
-      containerID: 3,
-      containerName: 'footer',
-      content: page.footer,
+      paddingLength: 0,
+      containerID: 2,
+      containerName: 'bar',
+      content: page.bottom,
       isEventCapture: 0,
+    }))
+  }
+
+  return containers
+}
+
+function createHiddenContainers(): TextContainerProperty[] {
+  return [
+    new TextContainerProperty({
+      xPosition: 0,
+      yPosition: 0,
+      width: 576,
+      height: 288,
+      borderWidth: 0,
+      borderColor: 5,
+      paddingLength: 0,
+      containerID: 1,
+      containerName: 'hidden',
+      content: 'HUD hidden · tap to show',
+      isEventCapture: 1,
     }),
   ]
 }
@@ -281,7 +271,9 @@ async function initializeGlasses(): Promise<void> {
     : journeyStateVersion
   const startupContainers = initialStagePage === undefined
     ? createStatusContainers()
-    : createStageContainers(initialStagePage)
+    : journeyState.hudHidden
+      ? createHiddenContainers()
+      : createStageContainers(initialStagePage)
 
   function withBridgeTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
@@ -319,6 +311,8 @@ async function initializeGlasses(): Promise<void> {
   let exitRequestQueued = false
   let bridgeCallPending: Promise<unknown> | null = null
   let journeyRenderQueued = false
+  let hiddenClearQueued = false
+  let hiddenNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
   function startBridgeCall<T>(
     label: string,
@@ -336,8 +330,10 @@ async function initializeGlasses(): Promise<void> {
       bridgeCallPending = null
       if (exitRequestQueued) {
         void flushExitRequest()
-      } else {
+      } else if (journeyRenderQueued) {
         void flushJourneyRender()
+      } else {
+        void flushHiddenNoticeClear()
       }
     }).catch(() => undefined)
     return rawBridgeCall
@@ -479,7 +475,68 @@ async function initializeGlasses(): Promise<void> {
     console.log('Status refresh interval paused')
   }
 
+  function cancelHiddenNoticeTimer(): void {
+    if (hiddenNoticeTimer !== undefined) {
+      clearTimeout(hiddenNoticeTimer)
+      hiddenNoticeTimer = undefined
+    }
+    hiddenClearQueued = false
+  }
+
+  function scheduleHiddenNoticeClear(): void {
+    cancelHiddenNoticeTimer()
+    if (!journeyState.active || !journeyState.hudHidden) {
+      return
+    }
+
+    hiddenNoticeTimer = setTimeout(() => {
+      hiddenNoticeTimer = undefined
+      hiddenClearQueued = true
+      void flushHiddenNoticeClear()
+    }, HIDDEN_NOTICE_MS)
+  }
+
+  async function flushHiddenNoticeClear(): Promise<void> {
+    if (!hiddenClearQueued || bridgeCallPending !== null) {
+      return
+    }
+    if (!journeyState.active || !journeyState.hudHidden) {
+      hiddenClearQueued = false
+      return
+    }
+
+    const rawBridgeCall = startBridgeCall(
+      'Hidden HUD notice clear',
+      () => bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: 1,
+          containerName: 'hidden',
+          content: ' ',
+          contentOffset: 0,
+          contentLength: 0,
+        }),
+      ),
+    )
+    if (rawBridgeCall === undefined) {
+      return
+    }
+
+    hiddenClearQueued = false
+    try {
+      const wasUpdated = await withBridgeTimeout(
+        rawBridgeCall,
+        'hidden textContainerUpgrade',
+      )
+      if (!wasUpdated) {
+        console.error('Hidden HUD notice clear failed')
+      }
+    } catch (error) {
+      console.error('Unable to clear hidden HUD notice:', error)
+    }
+  }
+
   function requestJourneyRender(): void {
+    cancelHiddenNoticeTimer()
     pauseRefreshInterval()
     console.log('Status refresh paused for journey mode')
     journeyRenderQueued = true
@@ -491,13 +548,25 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
-    const page = currentStagePage()
-    if (page === undefined) {
+    const renderVersion = journeyStateVersion
+    let containers: TextContainerProperty[]
+    try {
+      if (journeyState.hudHidden) {
+        containers = createHiddenContainers()
+      } else {
+        const page = currentStagePage()
+        if (page === undefined) {
+          journeyRenderQueued = false
+          return
+        }
+        containers = createStageContainers(page)
+      }
+    } catch (error) {
       journeyRenderQueued = false
+      console.error('Unable to construct journey stage:', error)
       return
     }
 
-    const containers = createStageContainers(page)
     const rawBridgeCall = startBridgeCall(
       'Journey stage rebuild',
       () => bridge.rebuildPageContainer(
@@ -516,6 +585,11 @@ async function initializeGlasses(): Promise<void> {
       const wasRebuilt = await withBridgeTimeout(rawBridgeCall, 'rebuildPageContainer')
       if (!wasRebuilt) {
         console.error('Journey stage rebuild failed')
+      } else if (
+        journeyState.hudHidden
+        && journeyStateVersion === renderVersion
+      ) {
+        scheduleHiddenNoticeClear()
       }
     } catch (error) {
       console.error('Unable to rebuild journey stage:', error)
@@ -524,6 +598,11 @@ async function initializeGlasses(): Promise<void> {
 
   function moveJourneyStage(direction: 1 | -1): void {
     if (!journeyState.active || journeyState.journey === null) {
+      return
+    }
+
+    if (journeyState.hudHidden) {
+      console.log('Ignoring journey stage swipe while HUD is hidden')
       return
     }
 
@@ -543,6 +622,21 @@ async function initializeGlasses(): Promise<void> {
     }
 
     journeyState = { ...journeyState, stageIndex: nextIndex }
+    journeyStateVersion += 1
+    journeyRenderRequest?.()
+  }
+
+  function toggleJourneyHud(): void {
+    if (!journeyState.active) {
+      return
+    }
+
+    journeyState = {
+      ...journeyState,
+      hudHidden: !journeyState.hudHidden,
+    }
+    journeyStateVersion += 1
+    console.log(journeyState.hudHidden ? 'HUD hidden' : 'HUD shown')
     journeyRenderRequest?.()
   }
 
@@ -552,6 +646,7 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
+    cancelHiddenNoticeTimer()
     console.log('Calling shutDownPageContainer(1)')
     exitRequestQueued = true
     await flushExitRequest()
@@ -584,6 +679,7 @@ async function initializeGlasses(): Promise<void> {
 
   if (result === 0) {
     journeyRenderRequest = requestJourneyRender
+    hudTimerCancelRequest = cancelHiddenNoticeTimer
 
     const unsubscribe = bridge.onEvenHubEvent(event => {
       if (event.textEvent) {
@@ -606,7 +702,11 @@ async function initializeGlasses(): Promise<void> {
         const type = event.sysEvent.eventType ?? 0
 
         if (type === 0) {
-          console.log('Single tap')
+          if (journeyState.active) {
+            toggleJourneyHud()
+          } else {
+            console.log('Single tap')
+          }
         } else if (type === 3) {
           void requestExit()
         } else if (type === 4) {
@@ -619,11 +719,14 @@ async function initializeGlasses(): Promise<void> {
           }
         } else if (type === 5) {
           console.log('Foreground exited')
+          cancelHiddenNoticeTimer()
           pauseRefreshInterval()
         } else if (type === 6 || type === 7) {
           console.log(type === 6 ? 'Abnormal exit' : 'System exit')
+          cancelHiddenNoticeTimer()
           pauseRefreshInterval()
           journeyRenderRequest = undefined
+          hudTimerCancelRequest = undefined
           unsubscribe()
         }
       }
@@ -633,6 +736,9 @@ async function initializeGlasses(): Promise<void> {
       if (startupJourneyVersion === journeyStateVersion) {
         pauseRefreshInterval()
         console.log('Status refresh paused for journey mode')
+        if (journeyState.hudHidden) {
+          scheduleHiddenNoticeClear()
+        }
       } else {
         requestJourneyRender()
       }

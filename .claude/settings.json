@@ -62,7 +62,10 @@
       "Bash(awk '/class RebuildPageContainer/,/^}/' node_modules/@evenrealities/even_hub_sdk/dist/index.d.ts)",
       "Bash(awk -F\"'\" '{print $2}')",
       "Bash(awk '{print length\\($0\\), $0}')",
-      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o stage0.png)"
+      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o stage0.png)",
+      "Bash(awk '/^## Execution notes/,/^## Review$/' SYNC.md)",
+      "Bash(curl -s http://127.0.0.1:9899/api/ping)",
+      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o t11-stage0.png)"
     ]
   }
 }
