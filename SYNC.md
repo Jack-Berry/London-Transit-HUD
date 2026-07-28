@@ -513,6 +513,44 @@ Register both at module init (top level), same placement rules as the original s
 
 Everything else in T10 stands as specced, including all original acceptance criteria (the simulator run now becomes possible). Effort recommendation for Jack: **medium**, the design work survived round D; this is wiring the two supplied contracts into prepared slots.
 
+### 2026-07-28 — Round D.3: HUD-style layout revision plus tap-to-hide (T11)
+
+Jack's direction: the journey pages must not dominate the wearer's view. Content lives in a top band and a bottom band with the middle of the display clear (the middle of the lens is the real world). The route bar moves to the bottom; everything else goes up top. Single tap hides the HUD entirely, with a 5-second `HUD hidden · tap to show` notice; tap again restores it.
+
+---
+
+#### T11 — Journey pages become top/bottom bands, single tap toggles the HUD
+
+**Ride page layout (replaces the round D 54/198/36 stack):**
+
+- Top container `header`: `x:0 y:0 w:576`, `paddingLength: 0`, `isEventCapture: 1`. Lines (27px each, height = lineCount * 27):
+  1. `instruction.summary` (pxTruncated to 568px as now).
+  2. `Stage N of M · <duration> min · arrive <HH:MM>` (the detail line moves up here; drop the separate stops-line).
+  3. Only while `stageIndex === 0`: `Swipe: stages   Tap: hide   2x: exit` (the standing footer hint is retired; after the first stage the top band is two lines).
+- Bottom container `bar`: `x:0 w:576 h:54`, `paddingLength: 0`, `isEventCapture: 0`, positioned flush to the bottom: `y: 234`. Two lines:
+  1. The names line (`<departure> → <arrival>`, truncation rules unchanged).
+  2. The measured bar, unchanged from round D, now with `· <stops> stops` appended after the bar if it still measures as one line at 568px; otherwise the stop count joins the top band's line 2 instead (measure, decide, never wrap).
+- **The middle band (roughly y 81 to y 234) must contain no content in any ride layout.** This is the point of the revision and it is screenshot-verifiable.
+
+**Walk page:** top band only (summary line, `about <N> min · Stage N of M`, plus the stage-0 hint line when applicable). No bottom container. **Arrive page:** top band only (`Walk to your destination`). The whole lower two-thirds of the display is clear on both.
+
+**Tap to hide (journey mode only; the status board is unaffected):**
+
+- Single tap (`sysEvent` with `eventType ?? 0 === 0`, the elision rule as ever) while a journey page is visible: rebuild to the hidden layout, which is ONE full-screen text container, `x:0 y:0 w:576 h:288`, `isEventCapture: 1`, content `HUD hidden · tap to show`. **A page must always keep exactly one event-capturing container or taps stop arriving, and a text container's content may not be an empty string: use a single space `' '` for the blank state.**
+- 5 seconds after entering hidden state, replace the message with `' '` via `textContainerUpgrade` (flicker-free, through the serialised gate, exact `containerID`/`containerName` match as ever). Unlit pixels are transparent on hardware, so the display genuinely appears empty. Cancel this timer if anything pre-empts it (tap to show, exit, background restore).
+- Single tap while hidden: rebuild back to the current stage page. Swipes while hidden are ignored. Double tap keeps its exit behaviour in BOTH states.
+- Add `hudHidden` to the journey snapshot state (exporter and restorer both), so pocketing the phone while hidden restores hidden. Restore renders whichever of stage page or hidden layout the state says.
+
+Acceptance criteria:
+
+- Builds and all standing greps pass.
+- Simulator, dev journey: ride page shows two bands with the middle band (y 81 to 234) containing zero lit pixels (lead verifies from the RGBA screenshot); the bar and names sit flush to the bottom; the hint line appears on stage 0 only.
+- Single tap hides the HUD and shows the notice; after ~5 seconds the display is fully blank (zero lit pixels); a tap restores the exact current stage page; swipes while hidden do nothing; double tap still raises the exit dialog from both visible and hidden states.
+- All rebuilds and the upgrade go through the serialised gate (console evidence as before).
+- `hudHidden` appears in the snapshot exporter and restorer with a `??` fallback.
+
+Effort recommendation for Jack: **medium.** The components survive; this is layout arithmetic and one well-specified state toggle.
+
 ---
 
 ---
