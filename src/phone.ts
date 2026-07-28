@@ -51,7 +51,7 @@ type JourneySelection =
     place: PlaceMatch
   }
 
-interface JourneyLeg {
+export interface JourneyLeg {
   mode?: {
     name?: string
   }
@@ -61,9 +61,26 @@ interface JourneyLeg {
   arrivalPoint?: {
     commonName?: string
   }
+  routeOptions?: Array<{
+    name?: string
+  }>
+  instruction?: {
+    summary?: string
+  }
+  departureTime?: string
+  arrivalTime?: string
+  duration?: number
+  isDisrupted?: boolean
+  disruptions?: unknown[]
+  path?: {
+    stopPoints?: Array<{
+      id?: string
+      name?: string
+    }>
+  }
 }
 
-interface Journey {
+export interface Journey {
   duration: number
   startDateTime: string
   arrivalDateTime: string
@@ -98,8 +115,13 @@ const timeFormatter = new Intl.DateTimeFormat('en-GB', {
 })
 
 let selectedJourney: Journey | undefined
+let journeySelectionHandler: (journey: Journey) => void = () => undefined
 
-export function initializePhoneUi(apiBase: string): void {
+export function initializePhoneUi(
+  apiBase: string,
+  onJourneySelected: (journey: Journey) => void,
+): void {
+  journeySelectionHandler = onJourneySelected
   const form = getElement<HTMLFormElement>('journey-form')
   const fromControl = createStationControl('from')
   const toControl = createStationControl('to')
@@ -706,6 +728,7 @@ function createJourneyCard(
   goButton.addEventListener('click', () => {
     selectedJourney = journey
     console.log('Journey selected', selectedJourney)
+    journeySelectionHandler(selectedJourney)
 
     document.querySelectorAll<HTMLButtonElement>('.go-button').forEach(button => {
       button.classList.remove('is-selected')

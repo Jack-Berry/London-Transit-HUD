@@ -55,7 +55,14 @@
       "Bash(curl -s \"https://photon.komoot.io/api/?q=ministry%20of%20sound&lat=51.5074&lon=-0.1278&limit=4\")",
       "Bash(curl -s \"https://photon.komoot.io/api/?q=french%20house%20soho&lat=51.5074&lon=-0.1278&limit=3\")",
       "Bash(ssh -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'cd ~/london-transit-hud && git pull 2>&1 | tail -1 && cd proxy && docker compose up -d --build 2>&1 | tail -1')",
-      "Bash(curl -s 'https://transit.berrydev.co.uk/geocode?q=french%20house%20soho')"
+      "Bash(curl -s 'https://transit.berrydev.co.uk/geocode?q=french%20house%20soho')",
+      "Bash(curl -s -o /dev/null -w 'blank q: %{http_code}\\\\n' 'https://transit.berrydev.co.uk/geocode?q=%20')",
+      "Bash(node places-test.mjs .)",
+      "Bash(python3 -c \"import json; print\\(json.load\\(open\\('node_modules/@evenrealities/even_hub_sdk/package.json'\\)\\)['version']\\)\")",
+      "Bash(awk '/class RebuildPageContainer/,/^}/' node_modules/@evenrealities/even_hub_sdk/dist/index.d.ts)",
+      "Bash(awk -F\"'\" '{print $2}')",
+      "Bash(awk '{print length\\($0\\), $0}')",
+      "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o stage0.png)"
     ]
   }
 }
