@@ -1,0 +1,11 @@
+services:
+  transit-proxy:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - connect-remote_default
+
+networks:
+  connect-remote_default:
+    external: true

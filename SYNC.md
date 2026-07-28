@@ -344,6 +344,17 @@ DNS record for the chosen subdomain, site block in the shared Caddyfile, `.env` 
 - **Could not verify / question for the lead:** The local Vite server launched successfully after permission was granted, but the plan's simulator command `npx evenhub-simulator http://127.0.0.1:5173` failed with npm `E404` because it tried to download the nonexistent unscoped package `evenhub-simulator`. The installed scoped simulator package exposes only an `evenhub` binary. Please provide the verified simulator CLI invocation/subcommand. Therefore the visual two-container render, live TfL comparison, gesture/exit-dialog behaviour, lifecycle events, and network-off recovery remain unverified in the simulator this round.
 - **Surprises:** The supplied simulator command does not resolve to the installed scoped package's binary; no SDK behaviour was inferred to work around it. No location API, proxy, milestone 2 work, client key, or Vite-prefixed environment variable was touched.
 
+**2026-07-28 — T4: TfL proxy service**
+
+- **Implementation:** Added a standalone TypeScript service under `proxy/` with its own package manifest, lockfile, TypeScript configuration, and zero runtime dependencies. It uses `node:http` and built-in `fetch`, requires the TfL key at startup, defaults to port 8100, and exposes `GET /healthz` plus the allowlisted `/tfl/` forwarding routes.
+- **HTTP/security behaviour:** GET and OPTIONS are the only accepted methods; every response receives wildcard CORS; preflight returns 204 with the specified allow headers/method; nonallowlisted paths return 404 before fetch; other methods return 405. Upstream calls have a 15-second abort timeout, generic 504/502 failures, preserve only the upstream `content-type`, and return the upstream status/body. A client-supplied `app_key` is discarded before the server-side key is set.
+- **Secret handling:** The key is read only from the process environment and is never logged. Request logs contain `requestUrl.pathname` only, never the query. Upstream response text is defensively redacted before being returned in case TfL echoes the requested URL. The real key was sourced from the repo-root `.env` only for the local process and was not copied. A check confirmed it was absent from saved live response bodies and source text.
+- **Container files:** Added a `node:22-alpine` Dockerfile that installs from the lockfile, builds, and starts `dist/server.js`; Compose defines only `transit-proxy`, uses `restart: unless-stopped`, reads `.env`, publishes no ports, and joins external `connect-remote_default`. `.dockerignore` excludes dependencies, build output, logs, and `.env`.
+- **Verification passed:** `npm run build` passes. Missing-key startup exits 1 with a clear generic message. Live local curls returned `200 {"ok":true}` for health, a TfL line-status JSON array with 11 entries and HTTP 200, 404 for `/tfl/Line/1`, 405 for POST, and 204 for OPTIONS. Checked responses carried `Access-Control-Allow-Origin: *`; preflight also carried the required allow-methods/headers. Logs showed paths without queries. `git diff --check` passed.
+- **Upstream surprise:** The specified journey acceptance URL was forwarded, but TfL returned HTTP 300 with `fromLocationDisambiguation` / `toLocationDisambiguation` rather than a `journeys` array. This is an upstream response for those identifiers, not a proxy-generated error; status and JSON were passed through as required.
+- **Could not verify:** `docker build proxy/` could not run because Docker is not installed in this environment (`docker: command not found`). The local host is Node 20.13, so local curl tests ran on Node 20; the production Node 22 path is represented by the unexecuted Dockerfile. Timeout and forced upstream-network-failure responses were verified by code inspection rather than induced against the live TfL host. The lead needs to run the Docker acceptance check before T5.
+- **Scope:** No application/client files or root package metadata were changed, and no T5 deployment work was started. The only non-`proxy/` edit for T4 is this required Execution notes entry.
+
 ---
 
 ## Review
@@ -388,6 +399,22 @@ Simulator verification by the lead (Sol's blocker resolved):
 
 **Milestone 1 is done.** T2, T3, T3b, T2b, T3c all pass. Committing this round to main. Next: milestone 2 planning (phone-side planning UI, proxy, journey fetch). Per Jack's direction, the product is a route planner that does the work for you: disruption information is only mentioned when it affects the user's route, so no dedicated status/disruption screens get planned. The milestone 1 status board stays as a walking-skeleton artefact and will be replaced, not extended.
 
+**2026-07-28 — Review of round A (T4). SIGNED OFF, one carry-forward correction.** The lead re-ran the full acceptance suite locally with the real key and independently verified: build passes, healthz, line status array, 404 on non-allowlisted paths, 405 on POST, 204 preflight with the specified headers, wildcard CORS on every response, and the key absent from response bodies and headers (Sol's leak checks re-confirmed; the lead's first grep produced a false positive from an empty shell variable, not from the proxy).
+
+Security review beyond the criteria, all passed:
+
+- Protocol-relative escape (`/tfl///evil.com` producing `//evil.com` as the upstream path) is blocked because the allowlist check runs before URL construction. Correct ordering, verified in code.
+- Dot-segment traversal is normalised away by the URL parser before the `/tfl/` check. Residual worst case is confined to api.tfl.gov.uk. Acceptable.
+- Client-supplied `app_key` is stripped before the server key is set; upstream bodies are defensively redacted; logs carry the path only. All verified.
+
+Findings for the record:
+
+- **Sol's HTTP 300 surprise is upstream product behaviour, not a bug.** The lead's acceptance URL used the hub id `HUBKGX`; TfL answers hub ids with a 300 `fromLocationDisambiguation` response. Specific NaPTAN ids (`940GZZLUKSX`) return 200 with journeys (lead-verified through the proxy). The proxy passing 300 through untouched is correct. Round B's UI must either prefer specific stop ids from search results or handle the disambiguation response; this is now a round B design input.
+- **Correction, carried to the next Sol round (does not block deploy):** `proxy/Dockerfile` last line uses `CMD ["npm", "start"]`. npm does not reliably forward SIGTERM, so container stops wait out the kill timeout. Change to `CMD ["node", "dist/server.js"]`. One line.
+- `docker build` was not runnable in Sol's or the lead's local environment; the lead will run it on the droplet as part of T5, which satisfies that criterion in the environment that actually matters.
+
+T5 (deploy) proceeds now.
+
 ---
 
 ## Open questions for Jack
@@ -398,7 +425,7 @@ Simulator verification by the lead (Sol's blocker resolved):
 4. **Line ordering.** Alphabetical, or severity-first (disrupted lines at the top)? I have left it unspecified for milestone 1; Sol will get an explicit instruction in review if it matters to you.
 5. **Phone-side planning UI.** I have assumed journey setup (station search, timing choice) happens on the phone screen and the glasses take over at Go, because glasses text entry is not workable. Shout if you pictured glasses-only.
 6. **Options screen location.** Should the fastest/cheapest comparison show on the glasses, the phone, or both? I have assumed both (choose on either), but phone-only would simplify the glasses UI.
-7. **Proxy subdomain (blocks T5, not T4).** I suggest `transit.berrydev.co.uk`. If you are happy with it, add a DNS A record pointing it at the droplet's IP (same target as car-proxy.berrydev.co.uk) and tell me when it is in; I will do the rest. If you would rather a different name, just say which.
+7. **Proxy subdomain (blocks T5, not T4).** I suggest `transit.berrydev.co.uk`. If you are happy with it, add a DNS A record pointing it at the droplet's IP (same target as car-proxy.berrydev.co.uk) and tell me when it is in; I will do the rest. If you would rather a different name, just say which. **ANSWERED 2026-07-28: Jack added the record; `transit.berrydev.co.uk` resolves to 178.128.168.63 (verified by the lead). T5 is unblocked once T4 passes review.**
 
 ## Jacks answers
 

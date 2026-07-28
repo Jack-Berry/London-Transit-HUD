@@ -17,7 +17,14 @@
       "Bash(npm rebuild *)",
       "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o exit-dialog.png)",
       "Bash(python3 -c \"print\\('saved'\\)\")",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(ssh -o ConnectTimeout=8 -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'hostname && docker ps --format \"{{.Names}} | {{.Image}} | {{.Ports}}\" && ls ~ && df -h / | tail -1 && free -m | head -2')",
+      "Bash(ssh -o BatchMode=yes deploy@car-proxy.berrydev.co.uk 'cat ~/connect-remote/deploy/Caddyfile 2>/dev/null; echo \"===networks===\"; docker network ls --format \"{{.Name}}\"; echo \"===matchhud compose===\"; cat ~/matchhud/docker-compose.yml 2>/dev/null | head -40')",
+      "Bash(curl -s --max-time 15 \"https://api.tfl.gov.uk/StopPoint/Search/kings%20cross?modes=tube,elizabeth-line,dlr,overground,bus\")",
+      "Bash(dig +short transit.berrydev.co.uk A)",
+      "Bash(dig +short car-proxy.berrydev.co.uk A)",
+      "Bash(awk '/^## Execution notes/,/^## Review$/' /Users/jackberry/Code/Projects/London-Transit-HUD/SYNC.md)",
+      "Bash(pkill -f \"dist/server.js\")"
     ]
   }
 }
