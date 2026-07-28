@@ -588,6 +588,15 @@ Jack's note from reviewing the live bar: the circles must be **evenly spaced**. 
 
 Acceptance: builds and greps pass; simulator screenshot shows visibly uniform gaps for the nine-stop fixture; the assertion uses the computed width; live fill, alerts and thinned/capped bars unaffected. Effort: **light**, one function plus its assertion.
 
+**2026-07-28 — Review of T12b plus journey-matrix verification. SIGNED OFF.** The spacing fix is exactly as specced: uniform connectors per segment, computed width, assertion updated; visually confirmed uniform on a 13-stop bar. And at Jack's prompting the lead ran a proper journey matrix in the simulator beyond the usual nine-stop fixture, all passing:
+
+- **1 stop (King's Cross to Euston):** endpoints-only bar with a clean connecting line, singular `1 stop` label.
+- **Bus journey (Camberwell to Peckham Rye, bus > walk > bus):** header carries the route number (`345 bus to Peckham Bus Station`), long bus-stop names truncate without collision, the mid-journey walk page renders (`Walk to The Aylesham Centre · about 5 min · Stage 2 of 4`), and the bus leg's first endpoint fills immediately since bus legs depart at once.
+- **13-stop District leg (Earl's Court to Upminster):** marker sampling engages (12 displayed for 13 stops), spacing perfectly uniform post-T12b, count stays honest at `13 stops`.
+- **National Rail leg (c2c to Upminster):** mode summary and rail station names all render correctly.
+
+Hosted copy redeployed with T12b. The glasses journey experience is now verified across short, long, bus, walk-between and rail stage types.
+
 ### 2026-07-28 — Queued, not yet tasked: phone UI restyle
 
 Jack likes the phone app's polish but it is not his vibe. A visual revision round is queued, **blocked on Jack providing reference examples** (apps or sites whose look he wants, plus specific dislikes about the current design). The lead will translate the examples into a concrete restyle spec for Sol once they arrive. Functionality, markup structure and accessibility are to be preserved; this is a skin, not a rebuild.
@@ -752,6 +761,13 @@ Jack likes the phone app's polish but it is not his vibe. A visual revision roun
 - **Decision:** Centralised the rule at the glasses text-formatting boundaries rather than changing the stored journey JSON, so snapshots, route comparison data, phone rendering, and API responses retain their source values while every glasses layout benefits from the shorter measured string.
 - **Verification:** Root and proxy builds pass and `git diff --check` passes. Five direct fixtures passed for endpoint, walk, alert, mixed-case, punctuation, and empty-result behavior; `Underground Station` now occurs in `src/` only as the normalizer's matching expression. No simulator run was needed for this text-only preprocessing change, so final hardware typography remains for lead/device confirmation.
 - **Scope/questions:** No SDK behavior, container geometry, bridge call, input, persistence, key handling, deployment, commit, or push changed. Nothing surprising arose and there are no questions for the lead.
+
+**2026-07-28 — T12b even route-bar spacing**
+
+- **Implementation:** Replaced proportional remainder distribution with one uniform `connectorsPerSegment` value: the available connector glyphs are divided by the displayed segment count, floored with a minimum of one, and that exact run is emitted for every gap. The live-fill assertion now compares against the computed bar width instead of the old fixed 520px target.
+- **Layout effects:** The nine-stop fixture produces a 380px bar centred at `x:98`, with all circle centres evenly spaced and both station names still deriving from the new bar endpoints. The capped 50-stop fixture produces a centred 500px bar. Marker sampling, passed/upcoming fill selection, stop count, alerts, and container geometry are unchanged.
+- **Verification:** Root and proxy builds pass; production dev-hook and standing safety greps remain clean; `git diff --check` passes. Synthetic nine-stop and capped 50-stop fixtures verified identical connector-run lengths and invariant widths across unfilled, partially filled, and completed states. Simulator startup returned 0 without errors; the RGBA screenshot visibly confirms uniform nine-stop gaps, and the console shows the subsequent live bar change entering the existing serialised bridge gate.
+- **Decisions/surprises/limits:** No decision beyond T12b was needed. The direct CommonJS fixture harness could not load the ESM-only measurement package, so the same source was bundled with the already-installed build tool for the synthetic assertions; product code was unaffected. Simulator font rendering remains an approximation pending hardware confirmation. No SDK question arose, no SDK documentation was consulted, and no deployment, commit, or push was performed.
 
 ---
 

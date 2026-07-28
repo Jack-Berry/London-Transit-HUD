@@ -191,18 +191,22 @@ function buildMeasuredBar(
     intermediateStopCount,
     maxIntermediateMarkers,
   )
-  const connectorCount = targetGlyphCount - 2 - displayedStopIndices.length
   const segmentCount = displayedStopIndices.length + 1
+  const connectorsPerSegment = Math.max(
+    1,
+    Math.floor(
+      (targetGlyphCount - 2 - displayedStopIndices.length) / segmentCount,
+    ),
+  )
+  const computedBarWidth = (
+    2
+    + displayedStopIndices.length
+    + (segmentCount * connectorsPerSegment)
+  ) * glyphWidth
   let bar = rideHasStarted ? '●' : '○'
 
   for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
-    const previousConnectors = Math.floor(
-      (connectorCount * segmentIndex) / segmentCount,
-    )
-    const currentConnectors = Math.floor(
-      (connectorCount * (segmentIndex + 1)) / segmentCount,
-    )
-    bar += '─'.repeat(currentConnectors - previousConnectors)
+    bar += '─'.repeat(connectorsPerSegment)
 
     const stopIndex = displayedStopIndices[segmentIndex]
     if (stopIndex !== undefined) {
@@ -213,8 +217,8 @@ function buildMeasuredBar(
   bar += stopCount > 0 && passedStopCount >= stopCount ? '●' : '○'
 
   if (
-    getTextWidth(bar) !== ROUTE_BAR_WIDTH
-    || measureTextWrap(bar, ROUTE_BAR_WIDTH).lineCount !== 1
+    getTextWidth(bar) !== computedBarWidth
+    || measureTextWrap(bar, computedBarWidth).lineCount !== 1
   ) {
     throw new Error('Route bar width changed while applying live fill')
   }
