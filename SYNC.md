@@ -652,6 +652,28 @@ Effort recommendation for Jack: **high.** Layout restructure with platform-behav
 - Compact header landed; hero copy deleted. Version 0.1.2. Hosted copy redeployed.
 - Recommended pre-upload check for Jack: open transit.berrydev.co.uk in phone Safari and run one search: closest available cousin to the Even WKWebView before committing another upload cycle.
 
+### 2026-07-28 — Round H: search takeover and pointerdown selection (T15), from the third field round
+
+Field results on T14: same symptom in the Even app, and two decisive new facts from Jack. First, the Even app renders the page in a container smaller than Safari fullscreen, and inside such embedded WKWebViews `window.visualViewport` typically does NOT report the keyboard, so T13/T14's height-capping is being fed fullscreen numbers. Second, via macOS iPhone mirroring (no on-screen keyboard) everything was visible but **tapping an option just closed the list without selecting**: the selection handler runs on `click`, and any layout shift between finger-down and click completion (keyboard dismissal, list resize) moves the target and the click lands outside, which our outside-tap handler treats as dismiss. That fragility has likely been eating on-device taps all along.
+
+#### T15 — Make search take over the screen; select on first contact
+
+1. **Select on `pointerdown`, not `click`:** suggestion options handle `pointerdown` with `event.preventDefault()` (keeps the input focused, stops the tap stealing focus) and run the selection immediately. Keep `click` as a no-op fallback for keyboard/assistive activation (`keydown` Enter on a focused option still selects). The document-level outside-tap dismiss stays, but selection now wins the race by firing at first contact before any layout shift.
+2. **Search-takeover mode:** when either station input gains focus, add a `search-active` class to the app shell that hides (CSS `display: none`) the compact header, the OTHER station field, the timing fieldset, the datetime field, the plan button, the results section and the footer. The active `.station-field` becomes the first visible element, flush to the top of the container, with the suggestions list below it sized to `flex: 1` of the remaining shell height (internal scroll as ever). Exit takeover on: selection, outside tap, or a new small "Cancel" button rendered inside the takeover header row next to the input. On exit, everything restores exactly as before.
+3. **Stop trusting VisualViewport alone:** the list's max-height becomes `min(visualViewport-derived value, shellHeight - listTop - 12px)` where `shellHeight` is the app shell's own `clientHeight` (the container the Even app actually gives us). With takeover placing the list at ~90px from the top, several options remain visible even if a keyboard covers the whole lower half of the container and the API reports nothing.
+4. **Scroll headroom (Jack's instinct, as belt and braces):** while any input in the form is focused (including datetime), a bottom spacer (`padding-bottom: 45vh` on the shell content via the `search-active`/`input-focused` class) guarantees scroll range exists so anything can be scrolled above a keyboard using the inner scroller. Removed when nothing is focused so the resting layout stays one-screen.
+5. Bump `app.json` to `0.1.3`.
+
+Acceptance criteria:
+
+- Builds and standing greps pass.
+- Playwright 390x300 (brutal container simulation): focusing From enters takeover with the input's bounding box in the top ~100px and the list filling the rest; the TOP THREE options are visible inside 300px; selecting via `pointerdown` dispatch works; Cancel exits takeover restoring the full form; the To field is then visible without any scrolling.
+- Selection robustness test: dispatch `pointerdown` on an option followed by a `click` at DIFFERENT coordinates (simulating the layout-shift race); the selection must stick and the list must close selected, not dismissed.
+- Full flow at 390x660 and desktop unaffected; takeover never triggers from the datetime input.
+- Grep: no `click`-only selection path remains on suggestion options.
+
+Effort recommendation for Jack: **high.** This is the third swing; the criteria above simulate the hostile container rather than a friendly browser, and the pointerdown change must not break desktop mouse or keyboard access.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
