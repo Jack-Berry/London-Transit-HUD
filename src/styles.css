@@ -519,16 +519,29 @@ input[data-selected="true"] + .input-state {
 }
 
 .app-shell.search-active .suggestion-option {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
 }
 
+.app-shell.search-active .suggestion-name {
+  min-width: 0;
+}
+
 .app-shell.search-active .suggestion-option .mode-list {
+  min-width: 0;
   flex-wrap: nowrap;
   justify-content: flex-end;
   overflow: hidden;
+}
+
+.app-shell.search-active .suggestion-option .mode-chip {
+  flex: 0 0 auto;
+}
+
+.app-shell.search-active .suggestion-option .mode-chip:nth-child(n + 3) {
+  display: none;
 }
 
 .app-shell.search-active .suggestion-heading {
