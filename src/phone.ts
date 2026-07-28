@@ -103,6 +103,8 @@ interface StationControl {
   selected?: JourneySelection
   debounce?: ReturnType<typeof setTimeout>
   abortController?: AbortController
+  hasScrolledForSuggestions: boolean
+  stopViewportTracking?: () => void
 }
 
 class StopIdentificationError extends Error {}
@@ -195,10 +197,16 @@ function createStationControl(prefix: 'from' | 'to'): StationControl {
     input: getElement<HTMLInputElement>(`${prefix}-input`),
     suggestions: getElement<HTMLElement>(`${prefix}-suggestions`),
     error: getElement<HTMLElement>(`${prefix}-error`),
+    hasScrolledForSuggestions: false,
   }
 }
 
 function bindStationSearch(control: StationControl, apiBase: string): void {
+  control.input.addEventListener('focus', () => {
+    control.hasScrolledForSuggestions = false
+    scheduleStationFieldScroll(control)
+  })
+
   control.input.addEventListener('input', () => {
     control.selected = undefined
     control.error.textContent = ''
@@ -376,6 +384,15 @@ function renderSuggestions(
 
   control.suggestions.hidden = false
   control.input.setAttribute('aria-expanded', 'true')
+  startSuggestionViewportTracking(control)
+
+  if (
+    !control.hasScrolledForSuggestions
+    && document.activeElement === control.input
+  ) {
+    control.hasScrolledForSuggestions = true
+    scheduleStationFieldScroll(control)
+  }
 }
 
 function createSuggestionHeading(label: string): HTMLElement {
@@ -460,6 +477,50 @@ function selectDestination(control: StationControl, selection: JourneySelection)
 function hideSuggestions(control: StationControl): void {
   control.suggestions.hidden = true
   control.input.setAttribute('aria-expanded', 'false')
+  control.stopViewportTracking?.()
+  control.stopViewportTracking = undefined
+  control.suggestions.style.removeProperty('max-height')
+}
+
+function scheduleStationFieldScroll(control: StationControl): void {
+  setTimeout(() => {
+    if (document.activeElement !== control.input) {
+      return
+    }
+
+    control.input.closest<HTMLElement>('.station-field')?.scrollIntoView({
+      block: 'start',
+      behavior: 'smooth',
+    })
+  }, 300)
+}
+
+function startSuggestionViewportTracking(control: StationControl): void {
+  control.stopViewportTracking?.()
+
+  const visualViewport = window.visualViewport
+  if (visualViewport === undefined || visualViewport === null) {
+    control.suggestions.style.maxHeight = '40vh'
+    control.stopViewportTracking = undefined
+    return
+  }
+
+  const updateMaxHeight = (): void => {
+    const listTop = control.suggestions.getBoundingClientRect().top
+    const availableHeight = Math.max(
+      120,
+      Math.floor(visualViewport.height - listTop - 12),
+    )
+    control.suggestions.style.maxHeight = `${availableHeight}px`
+  }
+
+  updateMaxHeight()
+  visualViewport.addEventListener('resize', updateMaxHeight)
+  visualViewport.addEventListener('scroll', updateMaxHeight)
+  control.stopViewportTracking = () => {
+    visualViewport.removeEventListener('resize', updateMaxHeight)
+    visualViewport.removeEventListener('scroll', updateMaxHeight)
+  }
 }
 
 function uniqueModes(modes: string[]): string[] {

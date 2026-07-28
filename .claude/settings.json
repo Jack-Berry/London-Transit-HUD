@@ -83,7 +83,9 @@
       "Bash(curl -s http://127.0.0.1:9899/api/screenshot/glasses -o e-midleg.png)",
       "Bash(curl -s -o /dev/null -w \"5173: %{http_code}\\\\n\" http://localhost:5173/)",
       "Bash(curl -s -o /dev/null -w \"5174: %{http_code}\\\\n\" http://localhost:5174/)",
-      "Bash(curl -s --max-time 1 http://127.0.0.1:9899/api/ping)"
+      "Bash(curl -s --max-time 1 http://127.0.0.1:9899/api/ping)",
+      "Bash(rsync -az dist/app.json deploy@car-proxy.berrydev.co.uk:~/london-transit-hud-site/app.json)",
+      "Bash(unzip -l london-transit-hud.ehpk)"
     ]
   }
 }
