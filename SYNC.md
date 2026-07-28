@@ -355,6 +355,40 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **run this round on high.** T6 is trivial but T7 is genuine design judgement (layout, states, interaction detail are Sol's to shape within the spec).
 
+### 2026-07-28 — Milestone 2 round C: places, not just stops (T8, T9)
+
+Users must be able to type a bar, venue or shop name as either journey end. Geocoder decision and verification are in the Review section: Photon, through our proxy, place coordinates passed to the journey planner as `lat,long` (verified working: TfL picks the boarding stop and returns the walking legs itself).
+
+---
+
+#### T8 — Proxy: add a `/geocode` endpoint
+
+Extend `proxy/src/server.ts` (same zero-dependency style):
+
+- `GET /geocode?q=<text>` → forwards to `https://photon.komoot.io/api/?q=<urlencoded text>&limit=6&lat=51.5074&lon=-0.1278` (the fixed lat/lon biases results towards central London; do not pass client-supplied lat/lon this round). Return upstream status and JSON body; only `content-type` passes through; same CORS treatment as `/tfl/`.
+- Missing or blank `q` → 400 before any upstream call.
+- Reuse the existing timeout/error scaffolding (15s → 504, network failure → 502).
+- Response shape for reference (verified): GeoJSON `{features: [{geometry: {coordinates: [lon, lat]}, properties: {name, osm_value, street, postcode, city, ...}}]}`. **Note the coordinate order: `[lon, lat]`.** Pass the body through untouched; the client does the shaping.
+- No key exists for Photon; the `TFL_APP_KEY` handling is untouched. Log rule stays: path only, never the query (a place query is user location intent, keep it out of logs).
+
+Acceptance criteria: proxy build passes; `curl 'localhost:8100/geocode?q=ministry%20of%20sound'` returns GeoJSON with the nightclub as a feature; blank `q` returns 400 without an upstream call; CORS header present; existing `/tfl/` and `/healthz` behaviour unchanged (re-run the T4 curls); no query strings in logs.
+
+---
+
+#### T9 — Phone UI: merged stop and place search
+
+Extend the From and To fields so each search fires two parallel requests: the existing TfL stop search AND `GET {proxy}/geocode?q=...`. Render grouped suggestions: **"Stations & stops"** (existing rendering, mode chips) then **"Places"** (name, plus a small type label from `osm_value` e.g. pub, nightclub, and street/postcode as secondary text). Cap places shown at 5.
+
+- Selecting a place stores `{name, lat, lon}` and the journey endpoint for that end becomes the string `` `${lat},${lon}` `` (note Photon gives `[lon, lat]`, flip it). Stops keep using `icsId` exactly as now.
+- Both ends accept either kind. All existing behaviour (debounce, abort, stale-guard, error states) applies to the place fetch too; if one of the two searches fails, show the other's results rather than an error.
+- The journey request, cards, fastest/cheapest logic are unchanged: they neither know nor care whether an end was a stop or a place (the lead verified TfL returns the same journey shape with walking legs for coordinate ends).
+
+Acceptance criteria: `npm run build` passes; in a plain browser, typing "french house" under To shows The French House (pub) under Places, selecting it and planning from King's Cross renders cards whose first leg is a walk or whose last leg walks to the destination; typing "kings" still shows stations first; a place at BOTH ends also plans successfully; all round B grep checks still pass.
+
+---
+
+Effort recommendation for Jack: **medium.** The pattern is established from round B; T8 is mechanical and T9 extends existing components.
+
 ---
 
 ---
@@ -486,6 +520,8 @@ T5 (deploy) proceeds now.
 - **Deployed:** the lead pulled and rebuilt the proxy on the droplet so the running container picks up the direct `node` CMD.
 
 **Milestone 2 is complete.** Next planning: milestone 3, the glasses handoff: Go sends the chosen journey to the glasses, stage pages, the text-glyph route bar, position interpolation. The lead needs to verify per-leg line-name fields and re-check the leg `path.stopPoints` shape through the proxy before writing those tasks.
+
+**2026-07-28 addendum after discussion with Jack:** stop-to-stop is not enough; users must be able to type a bar or venue name and get there. TfL's gazetteer cannot do POIs, so a proper geocoder feeds lat,long into the journey call. **Decision: Photon (photon.komoot.io), OSM-backed, free, keyless, built for typeahead, routed through our proxy.** Verified live: "ministry of sound" returns the nightclub with correct coordinates and postcode; "french house soho" returns the pub. Nominatim's public instance is ruled out because its usage policy prohibits autocomplete-style traffic; Mapbox is the paid fallback if Photon's quality or availability disappoints, and the proxy indirection means swapping upstream later without touching the client. Tasked as milestone 2 round C below.
 
 **2026-07-28 — Jack asked whether we need another API for nearest-stop-to-destination. Answer: no for planning (verified live).** TfL Journey Planner accepts raw `lat,long` (and postcodes) as either journey end: given Soho coordinates it resolved the address, picked Tottenham Court Road as the boarding station itself, and returned the walking leg (`walking | 55 FRITH STREET, LONDON -> Tottenham Court Road Underground Station`). So door-to-door planning, "use current location", and the walk pages all come free from the existing `Journey/JourneyResults` endpoint with no new API. Two related notes for later milestones: (1) arbitrary place-name destinations (e.g. "Tate Modern") would use TfL's free-text journey lookup, whose HTTP 300 disambiguation options (with `parameterValue` lat,longs and match quality) can serve as a place picker: same endpoint, already allowlisted; (2) an explicit nearest-stop query for en-route GPS checks in M4 would be `StopPoint?lat=&lon=&radius=`, a path shape not currently allowlisted in the proxy, one line to add when needed.
 - Also verified through the live proxy while testing: hub ids (`HUBKGX`) are NOT valid journey locations. TfL treats them as free text and returns HTTP 300 with a list of fuzzy matches (highlight: "Chicken Hub" in Hackney). Search matches carry `icsId` (e.g. `1000129` for King's Cross), and journeys planned with `icsId` values return 200 with journeys and fares. Round B uses `icsId` exclusively.
