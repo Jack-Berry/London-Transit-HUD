@@ -551,6 +551,33 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **medium.** The components survive; this is layout arithmetic and one well-specified state toggle.
 
+### 2026-07-28 — Milestone 3 round E: live position and stop alerts (T12)
+
+Jack's brief: the bar's stops fill in as the train passes them, plus two alerts above the bar on every train or bus leg: `Next stop: <name>` for 10 seconds when the destination stop becomes the next one, and `This is your stop` from 30 seconds before estimated arrival, clearing on stage change or when the 30 seconds elapse. Both alerts show even while the HUD is hidden.
+
+**The timeline model (design decision, Sol implements exactly this):** there is no live vehicle feed in this round; position is interpolated from schedule arithmetic. For a ride leg with `departureTime`, `arrivalTime` and N `stopPoints` (boarding station excluded, arrival included), divide the interval into N equal segments: estimated arrival at `stopPoints[i]` is `departure + (i+1) * legDuration / N`. **Everything (bar fill, both alerts) is computed fresh from the clock on every tick, never from chained timers.** This is what makes the feature survive the background migration for free: the headless WebView keeps ticking with the phone pocketed, and a restore just recomputes from the journey JSON plus the clock. Nothing new goes in the snapshot.
+
+- **Clock indirection:** every time read goes through one `now()` helper. In dev builds only, a `&dev-clock=<seconds>` addition to the dev-journey URL offsets it, so the lead can time-travel through a journey in the simulator. Production bundles must contain no `dev-clock` string (same rule as `dev-journey`).
+- **Tick:** a 1-second interval evaluates state; bridge updates are sent ONLY when rendered content actually changes (a bar changes at most once per segment, alerts a few times per leg). The tick must NOT be paused on `FOREGROUND_EXIT_EVENT`: that pause is for the status board's interval only. The tick stops on exit events and while no journey is active.
+
+**Bar fill:** passed stops render `●`, upcoming stay `○` (both 20px, so the bar's measured width is invariant; assert rather than re-measure). On thinned or capped bars, fill the displayed intermediate markers proportionally to elapsed segments. Fill state applies per displayed ride page: a future leg's page shows no fill, a completed leg's page shows full fill. Updates go through `textContainerUpgrade` against the `bar` container's exact identity (`containerID: 6`, `containerName: 'bar'`), through the serialised gate.
+
+**The alert line, zero-flicker design:** every layout (ride, walk/top, arrive, hidden) gains one always-present text container `alert`, centred horizontally, sitting just above the bottom band (`y:166 h:27`, borderless, `paddingLength: 0`, `isEventCapture: 0`, content a single space `' '` when inactive: **empty string content is not allowed, and adding/removing containers needs a rebuild, so the container always exists and only its content changes**, pure flicker-free upgrades). Ride pages therefore have exactly 8 text containers, the platform maximum: do not add any more. The alert renders on whatever page is currently displayed (it is an alert, not page content), hidden layout included.
+
+- **Trigger A:** when `now()` passes the estimated arrival at the penultimate stop (for a single-stop leg: at departure), show `Next stop: <arrival name>` (pxTruncated to 400px) for 10 seconds, then back to `' '`.
+- **Trigger B:** when `now() >= arrivalTime - 30s`, show `This is your stop` until the user changes stage or `now() >= arrivalTime`, whichever first. B replaces A if they overlap.
+- Alert text position: centred via the measured-width positioning helpers already in journey-mode.ts.
+
+Acceptance criteria:
+
+- Builds and standing greps pass; production bundle contains neither `dev-journey` nor `dev-clock`.
+- The `alert` container exists in all four layouts with `' '` when inactive; ride pages have exactly 8 text containers, others within limits, still exactly one event capture each.
+- Simulator with dev-clock offsets (lead drives): mid-leg shows partial bar fill; at the penultimate stop's estimated time the `Next stop: Brixton` alert appears and clears after 10 seconds; at T-30 `This is your stop` appears; after estimated arrival it clears; the same alerts render while the HUD is hidden.
+- Console evidence: bar upgrades fire on segment transitions only, not every tick; all updates through the serialised gate.
+- Swiping to a future leg's page shows an unfilled bar; back to the live leg shows current fill.
+
+Effort recommendation for Jack: **high.** Time-derived state, cross-layout alert plumbing and careful update discipline.
+
 ---
 
 ---
