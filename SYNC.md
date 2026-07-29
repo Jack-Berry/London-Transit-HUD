@@ -711,6 +711,32 @@ Effort recommendation for Jack: **high.** New view, cross-module state flow, and
 
 **Also queued behind this:** the phone restyle still awaits Jack's reference examples and can ride the same "big phone push" if they arrive; the HUD element customisation and the real-time arrivals correction (upgrade interpolation with TfL's live arrivals feed, now justified by field evidence that schedule drift is the visible gap) remain on the backlog.
 
+### 2026-07-29 — Round I.2: expandable stop list on ride stages (T17), from Jack watching the live simulators
+
+Jack's direction: the phone side needs more detail. Tapping a ride stage in the active-journey view should expand it to show the name of every stop on that leg, so he knows exactly where he is while on the train. The phone has the space; use it.
+
+#### T17 — Tap a ride stage to reveal every stop, with live progress
+
+**Interaction:** each ride stage card in the active-journey view becomes expandable. Tapping the card (or a dedicated disclosure control on it) toggles an inline stop list; tapping again collapses it. Walk and arrive stages are not expandable. Default state is collapsed. Use a real `<button>` for the toggle with `aria-expanded`, so keyboard and assistive access come free. The End journey button and Maps links must keep working untouched.
+
+**The stop list:** one row per stop, in travel order, starting with the boarding station and ending at the arrival stop. Remember the verified shape: `leg.path.stopPoints[]` is `{id, name}` **starting from the first stop after boarding** (departure station not included), so prepend `departurePoint.commonName` to the displayed list. The row count is therefore `stopPoints.length + 1`.
+
+**Name cleanup (phone-side variant of the glasses normalizer):** remove the whole words `Underground` and `Station` (case-insensitive) from each displayed stop name, collapse the leftover whitespace, trim stray punctuation, and fall back to the original name if the result would be empty. `Brixton Underground Station` reads `Brixton`. Apply it to the stop rows and to the ride card's From/To endpoint names for consistency. Do NOT alter the stored journey object; clean at render time only, same architecture as the glasses normalizer.
+
+**Live progress in the list (the point of the feature):** reuse the same schedule interpolation the glasses bar uses; estimated arrival at `stopPoints[i]` is `departure + (i+1) * legDuration / N`. Export whatever helper is needed from `journey-mode.ts` rather than duplicating the arithmetic. Each row shows its estimated time (HH:MM, boarding row shows the leg departure time). On the existing 10-second phone tick: stops whose estimated time has passed get a "done" style, the next upcoming stop on the live leg gets a highlighted style, and future legs' lists show no progress. The tick must NOT collapse an expanded card or steal scroll position; if the tick re-renders rows, preserve expansion state across it.
+
+**Layout:** the list sits inside the card below the existing content, visually a vertical line of stops (dots or a simple rail down the left edge reads well next to the glasses bar metaphor, Sol's judgement within the current design language). Long lists (a 20-plus-stop District line leg) must not break the layout; natural page scrolling through the app shell is fine.
+
+Acceptance criteria:
+
+- Builds and standing greps pass; no new dependencies; glasses code and layouts untouched apart from any helper export from `journey-mode.ts`.
+- Playwright 390x660, King's Cross to Brixton fixture: Go, tap the ride stage: the list shows all 10 rows (boarding plus 9 stops), first row King's Cross St. Pancras cleaned of `Underground`/`Station`, last row Brixton, every row free of both words; tap again collapses; End journey still resets cleanly with an expanded card.
+- With a mid-leg dev-clock offset: passed stops styled done, the next stop highlighted, and the pattern matches the glasses bar fill for the same offset (lead cross-checks in the simulator).
+- Expansion survives at least one 10-second tick without collapsing.
+- A walk stage shows no disclosure control and its Maps link still works.
+
+Effort recommendation for Jack: **medium.** The interpolation and normalizer patterns both exist; this is a new component in an established view, with care needed on the tick/expansion interaction.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
