@@ -105,7 +105,17 @@
       "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-after-end.png)",
       "Bash(pkill -f \"vite.*5173\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://transit.berrydev.co.uk/)",
-      "Bash(git commit -m 'Round I: phone active-journey screen with clean-slate reset \\(T16\\) *)"
+      "Bash(git commit -m 'Round I: phone active-journey screen with clean-slate reset \\(T16\\) *)",
+      "Bash(git commit -m 'Plan round I.2: expandable stop list on ride stages \\(T17\\) from Jack'\\\\''s simulator feedback *)",
+      "Bash(node t17-flow.mjs)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(lsof -nP -iTCP:5173 -sTCP:LISTEN)",
+      "Bash(curl -s http://localhost:5174/)",
+      "Bash(sed -i '' \"s|http://localhost:5173/|http://localhost:5174/|\" t17-flow.mjs)",
+      "Bash(node t17-walk-devclock.mjs)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-midleg.png)",
+      "Bash(pkill -f \"vite --port 5174\")",
+      "Bash(pkill -f \"vite.*--port 5173\")"
     ]
   }
 }

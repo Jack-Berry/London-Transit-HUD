@@ -1138,6 +1138,120 @@ input[data-selected="true"] + .input-state {
   font-size: 0.72rem;
 }
 
+.stop-disclosure {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 0 12px;
+  border: 1px solid rgba(115, 224, 174, 0.18);
+  border-radius: 11px;
+  color: #bce8d3;
+  background: rgba(115, 224, 174, 0.055);
+  font-size: 0.72rem;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.stop-disclosure > span:last-child {
+  font-size: 1.05rem;
+  transition: transform 160ms ease;
+}
+
+.stop-disclosure[aria-expanded="true"] > span:last-child {
+  transform: rotate(180deg);
+}
+
+.stop-disclosure:hover,
+.stop-disclosure:focus-visible {
+  outline: none;
+  border-color: rgba(115, 224, 174, 0.48);
+  background: rgba(115, 224, 174, 0.1);
+}
+
+.active-stop-list {
+  position: relative;
+  display: grid;
+  gap: 0;
+  margin: 14px 0 2px;
+  padding: 2px 0 0;
+  list-style: none;
+}
+
+.active-stop-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  color: #849b90;
+  font-size: 0.75rem;
+}
+
+.active-stop-row:not(:last-child)::after {
+  position: absolute;
+  z-index: 0;
+  top: 25px;
+  bottom: -15px;
+  left: 6px;
+  width: 1px;
+  background: rgba(151, 177, 162, 0.22);
+  content: "";
+}
+
+.active-stop-row__dot {
+  position: relative;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #60766c;
+  border-radius: 50%;
+  background: #10221c;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.active-stop-row__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-stop-row__time {
+  color: #71887d;
+  font-variant-numeric: tabular-nums;
+}
+
+.active-stop-row.is-done {
+  color: #afc3b9;
+}
+
+.active-stop-row.is-done .active-stop-row__dot {
+  border-color: #72a890;
+  background: #72a890;
+}
+
+.active-stop-row.is-next {
+  color: #eef8f2;
+  font-weight: 720;
+}
+
+.active-stop-row.is-next .active-stop-row__dot {
+  border-color: var(--mint);
+  background: #10221c;
+  box-shadow: 0 0 0 4px rgba(115, 224, 174, 0.1);
+}
+
+.active-stop-row.is-next .active-stop-row__time {
+  color: var(--mint-bright);
+}
+
 .maps-link {
   display: inline-flex;
   min-height: 38px;

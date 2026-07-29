@@ -2,6 +2,7 @@ import { now } from './clock'
 import {
   activeJourneyStageIndexAt,
   deriveJourneyStages,
+  estimatedRideStopTimes,
   type JourneyStage,
 } from './journey-mode'
 
@@ -267,7 +268,8 @@ export function initializePhoneUi(
       return
     }
 
-    const activeIndex = activeJourneyStageIndexAt(activeJourney, now())
+    const tickTime = now()
+    const activeIndex = activeJourneyStageIndexAt(activeJourney, tickTime)
     activeStageList.querySelectorAll<HTMLElement>('.active-stage').forEach(
       (element, index) => {
         const isActive = index === activeIndex
@@ -278,6 +280,12 @@ export function initializePhoneUi(
           element.removeAttribute('aria-current')
         }
       },
+    )
+    updateActiveStopProgress(
+      activeStageList,
+      activeJourney,
+      activeIndex,
+      tickTime,
     )
   }
 
@@ -1090,6 +1098,7 @@ function createActiveStage(
 ): HTMLLIElement {
   const item = document.createElement('li')
   item.className = 'active-stage'
+  item.dataset.stageIndex = String(index)
 
   const marker = document.createElement('span')
   marker.className = 'active-stage__marker'
@@ -1124,18 +1133,23 @@ function createActiveStage(
     content.append(eyebrow, title)
 
     if (stage.type === 'ride') {
+      item.classList.add('active-stage--ride')
       const route = document.createElement('p')
       route.className = 'active-stage__route'
       route.append(
         createStageEndpoint(
           'From',
-          stage.leg.departurePoint?.commonName ?? 'Departure',
+          cleanPhoneStopName(
+            stage.leg.departurePoint?.commonName ?? 'Departure',
+          ),
           stage.leg.departureTime,
         ),
         createStageArrow(),
         createStageEndpoint(
           'To',
-          stage.leg.arrivalPoint?.commonName ?? 'Arrival',
+          cleanPhoneStopName(
+            stage.leg.arrivalPoint?.commonName ?? 'Arrival',
+          ),
           stage.leg.arrivalTime,
         ),
       )
@@ -1144,7 +1158,25 @@ function createActiveStage(
       const stopCount = document.createElement('p')
       stopCount.className = 'active-stage__meta'
       stopCount.textContent = `${stops} ${stops === 1 ? 'stop' : 'stops'}`
-      content.append(route, stopCount)
+
+      const stopListId = `active-stop-list-${index}`
+      const disclosure = document.createElement('button')
+      disclosure.type = 'button'
+      disclosure.className = 'stop-disclosure'
+      disclosure.setAttribute('aria-expanded', 'false')
+      disclosure.setAttribute('aria-controls', stopListId)
+      disclosure.innerHTML = `<span>Show all ${stops + 1} stops</span><span aria-hidden="true">⌄</span>`
+
+      const stopList = createActiveStopList(stage.leg, stopListId)
+      disclosure.addEventListener('click', () => {
+        const willExpand = disclosure.getAttribute('aria-expanded') !== 'true'
+        disclosure.setAttribute('aria-expanded', String(willExpand))
+        disclosure.firstElementChild!.textContent = willExpand
+          ? 'Hide stops'
+          : `Show all ${stops + 1} stops`
+        stopList.hidden = !willExpand
+      })
+      content.append(route, stopCount, disclosure, stopList)
     } else {
       const duration = document.createElement('p')
       duration.className = 'active-stage__meta'
@@ -1162,6 +1194,103 @@ function createActiveStage(
 
   item.append(marker, content)
   return item
+}
+
+function createActiveStopList(
+  leg: JourneyLeg,
+  id: string,
+): HTMLOListElement {
+  const stopNames = [
+    leg.departurePoint?.commonName ?? 'Departure',
+    ...(leg.path?.stopPoints ?? []).map(stop => stop.name ?? 'Stop'),
+  ]
+  const estimatedTimes = estimatedRideStopTimes(leg)
+  const list = document.createElement('ol')
+  list.id = id
+  list.className = 'active-stop-list'
+  list.hidden = true
+
+  stopNames.forEach((stopName, index) => {
+    const row = document.createElement('li')
+    row.className = 'active-stop-row'
+    row.dataset.stopIndex = String(index)
+
+    const dot = document.createElement('span')
+    dot.className = 'active-stop-row__dot'
+    dot.setAttribute('aria-hidden', 'true')
+
+    const name = document.createElement('span')
+    name.className = 'active-stop-row__name'
+    name.textContent = cleanPhoneStopName(stopName)
+
+    const time = document.createElement('time')
+    time.className = 'active-stop-row__time'
+    const estimatedTime = estimatedTimes?.[index]
+    time.textContent = estimatedTime === undefined
+      ? '—'
+      : timeFormatter.format(new Date(estimatedTime))
+    row.append(dot, name, time)
+    list.append(row)
+  })
+
+  return list
+}
+
+function updateActiveStopProgress(
+  container: HTMLElement,
+  journey: Journey,
+  activeStageIndex: number,
+  atMs: number,
+): void {
+  const stages = deriveJourneyStages(journey)
+
+  container.querySelectorAll<HTMLElement>('.active-stage--ride').forEach(card => {
+    const stageIndex = Number(card.dataset.stageIndex)
+    const stage = stages[stageIndex]
+    const rows = Array.from(
+      card.querySelectorAll<HTMLElement>('.active-stop-row'),
+    )
+    for (const row of rows) {
+      row.classList.remove('is-done', 'is-next')
+    }
+
+    if (
+      stage?.type !== 'ride'
+      || !Number.isInteger(stageIndex)
+      || stageIndex > activeStageIndex
+    ) {
+      return
+    }
+
+    const estimatedTimes = estimatedRideStopTimes(stage.leg)
+    if (estimatedTimes === undefined) {
+      return
+    }
+
+    let nextIndex: number | undefined
+    estimatedTimes.forEach((estimatedTime, index) => {
+      if (estimatedTime <= atMs) {
+        rows[index]?.classList.add('is-done')
+      } else if (
+        stageIndex === activeStageIndex
+        && nextIndex === undefined
+      ) {
+        nextIndex = index
+      }
+    })
+    if (nextIndex !== undefined) {
+      rows[nextIndex]?.classList.add('is-next')
+    }
+  })
+}
+
+function cleanPhoneStopName(original: string): string {
+  const cleaned = original
+    .replace(/\b(?:Underground|Station)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,.;:–—-]+|[\s,.;:–—-]+$/g, '')
+    .trim()
+  return cleaned === '' ? original : cleaned
 }
 
 function createStageEndpoint(

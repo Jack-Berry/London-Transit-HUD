@@ -316,6 +316,29 @@ export function rideHasStartedAt(leg: JourneyLeg, atMs: number): boolean {
   return timeline !== undefined && atMs >= timeline.departureMs
 }
 
+export function estimatedRideStopTimes(
+  leg: JourneyLeg,
+): number[] | undefined {
+  const range = legTimeRange(leg)
+  const stopCount = leg.path?.stopPoints?.length ?? 0
+  if (range === undefined) {
+    return undefined
+  }
+
+  return [
+    range.departureMs,
+    ...Array.from(
+      { length: stopCount },
+      (_, index) => range.departureMs + (
+        (
+          (range.arrivalMs - range.departureMs)
+          * (index + 1)
+        ) / stopCount
+      ),
+    ),
+  ]
+}
+
 export function journeyAlertAt(
   journey: Journey,
   atMs: number,
