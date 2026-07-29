@@ -888,6 +888,30 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** Cross-context state, a new glasses input surface, storage with undocumented edge behaviour, and the refetch-and-match flow all in one round; T20 is a one-line warm-up.
 
+### 2026-07-29 — Round M: saved journey persistence and swipe direction (T22, T23), from Jack's 0.1.4 hardware test
+
+Jack's field notes from the first hardware run of 0.1.4 (both queued for the next Sol session): the saved journey works but vanishes after being begun once, and the stage-swipe direction feels backwards.
+
+#### T22 — A saved journey survives until completed or removed
+
+Change the consumption rule from round L: **beginning a saved journey no longer clears the slot.** The slot now clears only on:
+
+1. **Remove** (the phone banner action), unchanged.
+2. **TTL expiry** (24h from save), unchanged.
+3. **Completion:** when a journey that was begun FROM the saved slot ends (End journey on the phone, or the confirmed system exit while it is active) at a moment `now()` at or past that fresh journey's final `arrivalDateTime`. Ending mid-journey (abandoning before arrival) KEEPS the save, so a missed attempt can be begun again; riding it to the end consumes it.
+
+Implementation notes: track "the active journey came from the saved slot" in a module-level flag plus the fresh journey's arrival timestamp (both belong in the background snapshot: add them to the exporter and restorer with `??` fallbacks, since a pocketed phone mid-journey must not forget the provenance). The completion check runs in the existing End journey and system-exit paths; the storage clear goes through the existing serialised write with its failure treatment from round L (journey teardown never blocks on the write). After a mid-journey abandon, the prompt/banner return exactly as if freshly loaded (glasses: End journey now rebuilds to the PROMPT rather than the status board when an unconsumed saved journey exists; phone: banner reappears, which round L already does).
+
+Acceptance: simulator via `?dev-saved`: begin, then End journey mid-journey (dev-clock before arrival) shows the prompt again and the slot survives (console evidence of NO clear write); begin, dev-clock past arrival, End journey clears the slot (console evidence of the clear write) and rebuilds the status board; Remove still clears; the two new snapshot fields appear in exporter and restorer; all standing greps and suites pass.
+
+#### T23 — Reverse the stage-swipe direction
+
+In the journey-mode input routing (src/main.ts), swap the mapping: `textEvent` type 1 (swipe up) becomes PREVIOUS stage, type 2 (swipe down) becomes NEXT stage. Clamping, the serialised rebuild path, hidden-HUD swipe-ignoring, and the saved-prompt swipe-to-skip are all unchanged. No text changes (the hints never named directions).
+
+Acceptance: simulator: swipe down advances stage 0 to 1, swipe up returns 1 to 0, clamps at both ends; hidden HUD still ignores swipes; prompt still skips on either swipe. (Simulator quirk on record since milestone 1: swipe-down events are sometimes swallowed by the simulator's native scroll; if so, verify the mapping by console event logs and Jack confirms feel on hardware.)
+
+Effort recommendation for Jack: **medium.** T23 is a two-line swap; T22's completion rule touches the snapshot contract and two teardown paths, which deserves care.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
