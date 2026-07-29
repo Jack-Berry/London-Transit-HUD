@@ -115,7 +115,11 @@
       "Bash(node t17-walk-devclock.mjs)",
       "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-midleg.png)",
       "Bash(pkill -f \"vite --port 5174\")",
-      "Bash(pkill -f \"vite.*--port 5173\")"
+      "Bash(pkill -f \"vite.*--port 5173\")",
+      "Bash(git commit -m 'Plan round J: light solid-colour phone restyle \\(T18\\) with Jack'\\\\''s reference stills *)",
+      "Bash(sed -i '' \"s|http://localhost:5173/|http://localhost:5174/|\" t16-flow.mjs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://transit.berrydev.co.uk/)",
+      "Bash(git commit -m 'Round J: light solid-colour phone restyle \\(T18\\) *)"
     ]
   }
 }

@@ -1013,6 +1013,35 @@ Jack likes the phone app's polish but it is not his vibe. A visual revision roun
 - **Verification passed:** Root and proxy builds pass, `git diff --check` passes, and standing greps remain clean. A bundled nine-stop fixture returned exactly ten timing rows from departure through arrival; its midpoint matched the glasses helper at four passed stop points. Direct cleanup fixtures produced `King's Cross St. Pancras` and `Brixton`; the only-keywords fixture correctly exercised the required original-name fallback. Source inspection confirms disclosure is ride-only, uses a button, and tick updates do not rebuild or collapse the list. No dependencies were added and no glasses layout or bridge call changed.
 - **Could not verify / lead action:** The local Vite server runs, but repeated prescribed browser discovery returned no available browser, and no prior phone screenshots exist in the workspace or temporary files. I therefore could not honestly run the required 390x660 click-through, ten-row DOM assertions, 10-second expansion-survival observation, mid-leg visual cross-check, or capture Jack's requested phone-state screenshots. The lead should capture at least planner, search takeover, route options, active collapsed, and active expanded/progress states during the browser acceptance run. No SDK fact was needed or inferred, no SDK documentation or EvenHub skill was consulted, and there are no questions for the lead. No deployment, commit, or push was performed; the pre-existing `.claude/settings.json` modification remains untouched.
 
+**2026-07-29 — T18 light, solid, high-contrast phone skin**
+
+- **Reference translation:** Read all six committed Genesis Remote stills and used only their value/density cues: warm off-white canvas, white controls and cards, neutral hairlines, near-black text, restrained uppercase micro-labels, and very soft ambient depth. The London transit layout, radii, spacing, component structure, class names and green identity remain intact; no reference branding, components or accent palette was copied.
+- **Palette and surfaces:** Converted `color-scheme` and the complete phone palette to light custom properties: `#f5f3ee` page, white surfaces, `#d9d6ce` borders, `#171a18` ink, `#5e6863` secondary text, and deep transit green `#14643f`. Body washes, panel gradients, active-card gradients and the primary-button gradient are gone. Panels, inputs, suggestion overlay, option cards, active cards and summary strip are solid; shadows are neutral and ambient with no coloured glow.
+- **Components and states:** Compare and Go now share the same solid deep-green/white primary treatment, including an AA-safe solid disabled state. Cancel and stop disclosure are quiet outlined controls. The live stage uses an accent border, inset edge and pale solid green tint. End journey uses a muted solid red tint. Search takeover, input/focus/error states, Google Maps action, footer and empty-results note were all translated to the light palette. Focus-visible outlines are near-black and explicit on primary, secondary, disclosure, suggestion, segmented, End and Maps interactions.
+- **Mode and progress legibility:** Every mode chip now has its own solid, dark-enough fill with white text. T17 pending rows use secondary dark text with hollow grey dots; done rows use darker green text plus solid green dots; next uses near-black bold text, a deep-green hollow dot/ring and deep-green time. These states are intentionally more separated than the dark skin for outdoor use.
+- **Gradient audit:** The production CSS contains exactly two `gradient` declarations: `.route-stem` and `.journey-card--combined::before`, both explicitly permitted accents. No dark panel fill, body radial wash, or other gradient remains.
+- **Contrast table (WCAG ratios):**
+
+  | Pair | Ratio |
+  | --- | ---: |
+  | Primary `#171a18` on page `#f5f3ee` | 15.82:1 |
+  | Primary `#171a18` on white | 17.54:1 |
+  | Secondary `#5e6863` on page | 5.21:1 |
+  | Secondary / pending stop `#5e6863` on white | 5.78:1 |
+  | Placeholder `#6d7671` on white | 4.69:1 |
+  | White on accent `#14643f` | 7.18:1 |
+  | White on disabled action `#4f665a` | 6.21:1 |
+  | Accent-strong `#0f4f32` on tint `#e7f3eb` | 8.43:1 |
+  | Error `#9f342f` on page | 6.30:1 |
+  | End text `#832823` on red tint `#faece9` | 7.96:1 |
+  | Done stop `#365d49` on white | 7.45:1 |
+  | Next stop `#171a18` on white | 17.54:1 |
+  | Tube / Elizabeth / DLR / Overground chips | 7.00 / 8.20 / 5.51 / 5.96:1 |
+  | Bus / National Rail / Walking / Other chips | 6.48 / 9.65 / 6.03 / 6.92:1 |
+
+- **Verification passed:** Root and proxy builds pass; `git diff --check` passes. The product diff is confined to `src/styles.css`; no markup, TypeScript, ARIA, class hook, glasses code, dependency or behavior changed. Standing safety greps and production dev-hook checks remain clean. Shipped-CSS inspection confirms only the two approved gradients.
+- **Could not verify / lead action:** The prescribed browser surface still reports no available browser, so I could not honestly run the 390x660/desktop flows or capture the five-state light screenshot matrix Jack requested. The lead should run the unmodified T16/T17 Playwright suites and capture planner, search takeover, options, active collapsed and active expanded/progress screens for comparison with the saved dark baselines. No SDK question arose, no SDK documentation or EvenHub skill was consulted, and no deployment, commit or push was performed. The pre-existing `.claude/settings.json` modification remains untouched.
+
 ---
 
 ## Review
@@ -1164,6 +1193,15 @@ Milestone 2 round C complete. Next: milestone 3 planning (glasses handoff).
 - **Environment note for the record:** port 5173 was occupied by an unrelated Beriscope dev server this session, so verification ran on 5174; no code impact.
 - **Restyle inputs captured:** the lead saved phone-state screenshots (planner, search takeover, options, active collapsed, active expanded with progress) during the run, ready to set against Jack's reference examples when they arrive.
 - **Deployed:** hosted copy redeployed. Version stays 0.1.3. Hardware items carried forward unchanged.
+
+**2026-07-29 — Review of round J (T18). SIGNED OFF, no corrections.** The restyle lands Jack's brief precisely, and the discipline in the execution deserves noting.
+
+- **No-behaviour-change proof:** the product diff is `src/styles.css` alone, and the unmodified T16 and T17 Playwright suites pass 34/34 against the light skin (plus the dev-clock progress script 7/7; one run flagged a fetch-timing flake in the test harness itself, re-run clean, not a code issue). No markup, ARIA or TS was touched.
+- **Gradient rule verified in the shipped bundle:** exactly two gradient declarations survive, `.route-stem` (the From-to-To line Jack likes) and the combined-card hairline, both approved accents. The body washes, panel and card fills, and the button gradient are gone; backgrounds and buttons are solid.
+- **Contrast table independently audited:** the lead recomputed six of Sol's fourteen listed pairs with a separate WCAG implementation and every figure matched to the decimal (e.g. primary on page 15.82:1, placeholder on white 4.69:1, white on accent 7.18:1). All pairs pass AA; most clear it by a wide margin.
+- **Visual matrix (five states, screenshots on file):** the planner reads exactly as the reference values intended: warm off-white page, white panel, deep solid green primary and selected segment, gradient stem intact between the route dots. Option cards are white with solid chips and green eyebrows; the search takeover is a crisp white overlay with legible grouped results; the active journey view keeps its structure with a pale-tint live card, solid green done dots and a bolder next-stop treatment that is genuinely more separated than the dark skin, per spec. Desktop at 1280px holds the 720px shell cap with zero page errors.
+- **Known cosmetic carry-over, unchanged:** the T15b takeover chip-clip nit (a mode chip can clip at the row edge) is still visible and still accepted.
+- **Deployed:** hosted copy redeployed at transit.berrydev.co.uk. Version stays 0.1.3. Jack should eyeball the live URL in phone Safari, ideally outdoors, since bright-light legibility was the brief.
 
 ---
 
