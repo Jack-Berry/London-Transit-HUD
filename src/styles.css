@@ -609,10 +609,13 @@ input[data-selected="true"] + .input-state {
 
 .datetime-field {
   margin-top: 14px;
+  overflow: hidden;
 }
 
 .datetime-field input {
   height: 52px;
+  min-width: 0;
+  max-width: 100%;
   padding: 0 14px;
 }
 
@@ -678,6 +681,48 @@ input[data-selected="true"] + .input-state {
   gap: 14px;
 }
 
+.journey-step-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: -6px 0 16px;
+}
+
+.journey-step-controls button {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #aebcb4;
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.journey-step-controls button:hover,
+.journey-step-controls button:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  background: var(--accent-tint);
+}
+
+.journey-step-controls button:disabled {
+  border-color: var(--line);
+  color: #737b77;
+  background: var(--surface-muted);
+  cursor: not-allowed;
+}
+
+.journey-step-controls button.is-loading {
+  cursor: wait;
+}
+
+.journey-step-error {
+  margin: 0 0 14px;
+}
+
 .journey-card {
   position: relative;
   overflow: hidden;
@@ -721,7 +766,14 @@ input[data-selected="true"] + .input-state {
   text-transform: uppercase;
 }
 
-.journey-card--cheapest .option-badge {
+.option-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.option-badge--cheapest {
   color: #5b6d00;
 }
 
@@ -873,6 +925,18 @@ input[data-selected="true"] + .input-state {
   font-size: 0.64rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.leg-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.leg-route-name {
+  color: #4f5954;
+  font-size: 0.68rem;
+  font-weight: 750;
 }
 
 .go-button {

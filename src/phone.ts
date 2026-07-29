@@ -102,6 +102,29 @@ export interface Journey {
 
 interface JourneyResponse {
   journeys?: Journey[]
+  searchCriteria?: {
+    timeAdjustments?: JourneyTimeAdjustments
+  }
+}
+
+interface JourneyTimeAdjustment {
+  date?: string
+  time?: string
+  timeIs?: string
+}
+
+interface JourneyTimeAdjustments {
+  earliest?: JourneyTimeAdjustment
+  earlier?: JourneyTimeAdjustment
+  later?: JourneyTimeAdjustment
+  latest?: JourneyTimeAdjustment
+}
+
+interface JourneyPagingState {
+  journeyPath?: string
+  timeAdjustments?: JourneyTimeAdjustments
+  abortController?: AbortController
+  requestVersion: number
 }
 
 interface StationControl {
@@ -159,9 +182,16 @@ export function initializePhoneUi(
   const planButton = getElement<HTMLButtonElement>('plan-button')
   const resultsSection = getElement<HTMLElement>('results-section')
   const results = getElement<HTMLElement>('journey-results')
+  const stepControls = getElement<HTMLElement>('journey-step-controls')
+  const stepError = getElement<HTMLElement>('journey-step-error')
+  const earlierButton = getElement<HTMLButtonElement>('earlier-journeys-button')
+  const laterButton = getElement<HTMLButtonElement>('later-journeys-button')
   const timingInputs = Array.from(
     form.querySelectorAll<HTMLInputElement>('input[name="timing"]'),
   )
+  const journeyPaging: JourneyPagingState = {
+    requestVersion: 0,
+  }
   let activeJourney: Journey | undefined
   let activeJourneyInterval: ReturnType<typeof setInterval> | undefined
 
@@ -253,6 +283,16 @@ export function initializePhoneUi(
       datetimeField.hidden = isNow
       datetimeInput.required = !isNow
       plannerError.textContent = ''
+      resetJourneyPaging(
+        journeyPaging,
+        stepControls,
+        stepError,
+        earlierButton,
+        laterButton,
+      )
+      results.replaceChildren()
+      resultsSection.hidden = true
+      setPlanningState(planButton, false)
     })
   }
 
@@ -328,6 +368,13 @@ export function initializePhoneUi(
     plannerError.textContent = ''
     results.replaceChildren()
     resultsSection.hidden = true
+    resetJourneyPaging(
+      journeyPaging,
+      stepControls,
+      stepError,
+      earlierButton,
+      laterButton,
+    )
     setPlanningState(planButton, false)
     activeSummary.replaceChildren()
     activeStageList.replaceChildren()
@@ -379,6 +426,39 @@ export function initializePhoneUi(
       planButton,
       resultsSection,
       results,
+      stepControls,
+      stepError,
+      earlierButton,
+      laterButton,
+      journeyPaging,
+    })
+  })
+
+  earlierButton.addEventListener('click', () => {
+    void stepJourneyPage('earlier', {
+      plannerError,
+      planButton,
+      resultsSection,
+      results,
+      stepControls,
+      stepError,
+      earlierButton,
+      laterButton,
+      journeyPaging,
+    })
+  })
+
+  laterButton.addEventListener('click', () => {
+    void stepJourneyPage('later', {
+      plannerError,
+      planButton,
+      resultsSection,
+      results,
+      stepControls,
+      stepError,
+      earlierButton,
+      laterButton,
+      journeyPaging,
     })
   })
 
@@ -793,6 +873,11 @@ interface PlanJourneyOptions {
   planButton: HTMLButtonElement
   resultsSection: HTMLElement
   results: HTMLElement
+  stepControls: HTMLElement
+  stepError: HTMLElement
+  earlierButton: HTMLButtonElement
+  laterButton: HTMLButtonElement
+  journeyPaging: JourneyPagingState
 }
 
 async function planJourney(options: PlanJourneyOptions): Promise<void> {
@@ -806,9 +891,23 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
     planButton,
     resultsSection,
     results,
+    stepControls,
+    stepError,
+    earlierButton,
+    laterButton,
+    journeyPaging,
   } = options
 
   plannerError.textContent = ''
+  resetJourneyPaging(
+    journeyPaging,
+    stepControls,
+    stepError,
+    earlierButton,
+    laterButton,
+  )
+  resultsSection.hidden = true
+  results.replaceChildren()
   let isValid = true
 
   if (fromControl.selected === undefined) {
@@ -831,49 +930,198 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
   const journeyPath = `${apiBase}/Journey/JourneyResults/${
     encodeURIComponent(fromControl.selected.endpoint)
   }/to/${encodeURIComponent(toControl.selected.endpoint)}`
+  journeyPaging.journeyPath = journeyPath
+
+  await loadJourneyPage(timingParams, true, {
+    plannerError,
+    planButton,
+    resultsSection,
+    results,
+    stepControls,
+    stepError,
+    earlierButton,
+    laterButton,
+    journeyPaging,
+  })
+}
+
+interface JourneyPageOptions {
+  plannerError: HTMLElement
+  planButton: HTMLButtonElement
+  resultsSection: HTMLElement
+  results: HTMLElement
+  stepControls: HTMLElement
+  stepError: HTMLElement
+  earlierButton: HTMLButtonElement
+  laterButton: HTMLButtonElement
+  journeyPaging: JourneyPagingState
+}
+
+async function stepJourneyPage(
+  direction: 'earlier' | 'later',
+  options: JourneyPageOptions,
+): Promise<void> {
+  const adjustment = options.journeyPaging.timeAdjustments?.[direction]
+  const params = timeAdjustmentParams(adjustment)
+  if (params === undefined || options.journeyPaging.journeyPath === undefined) {
+    return
+  }
+
+  await loadJourneyPage(params, false, options)
+}
+
+async function loadJourneyPage(
+  timingParams: URLSearchParams,
+  isInitialRequest: boolean,
+  options: JourneyPageOptions,
+): Promise<void> {
+  const {
+    plannerError,
+    planButton,
+    resultsSection,
+    results,
+    stepControls,
+    stepError,
+    earlierButton,
+    laterButton,
+    journeyPaging,
+  } = options
+  const journeyPath = journeyPaging.journeyPath
+  if (journeyPath === undefined) {
+    return
+  }
+
+  const requestVersion = ++journeyPaging.requestVersion
+  journeyPaging.abortController?.abort()
+  const abortController = new AbortController()
+  journeyPaging.abortController = abortController
+
   const defaultUrl = withQuery(journeyPath, timingParams)
   const busParams = new URLSearchParams(timingParams)
   busParams.set('mode', 'bus')
   const busUrl = withQuery(journeyPath, busParams)
 
-  setPlanningState(planButton, true)
-  resultsSection.hidden = true
-  results.replaceChildren()
+  plannerError.textContent = ''
+  stepError.textContent = ''
+  setJourneyStepState(earlierButton, laterButton, undefined, true)
+  if (isInitialRequest) {
+    setPlanningState(planButton, true)
+  }
 
   try {
     const [defaultResponse, busResponse] = await Promise.all([
-      fetchJourneys(defaultUrl),
-      fetchJourneys(busUrl),
+      fetchJourneys(defaultUrl, abortController.signal),
+      fetchJourneys(busUrl, abortController.signal),
     ])
-    const defaultJourneys = validJourneys(defaultResponse.journeys)
-    const busJourneys = validJourneys(busResponse.journeys)
-
-    if (defaultJourneys.length === 0) {
-      plannerError.textContent = 'No routes found'
+    if (requestVersion !== journeyPaging.requestVersion) {
       return
     }
 
-    const fastest = defaultJourneys.reduce((best, journey) => (
-      journey.duration < best.duration ? journey : best
-    ))
-    const cheapest = [...defaultJourneys, ...busJourneys]
-      .filter(hasFare)
-      .reduce<Journey | undefined>((best, journey) => (
-        best === undefined || fareInPence(journey) < fareInPence(best) ? journey : best
-      ), undefined)
+    const journeys = prepareJourneyOptions([
+      ...validJourneys(defaultResponse.journeys),
+      ...validJourneys(busResponse.journeys),
+    ])
+    if (journeys.length === 0) {
+      const message = 'No routes found'
+      if (isInitialRequest) {
+        plannerError.textContent = message
+      } else {
+        stepError.textContent = message
+      }
+      return
+    }
 
-    renderJourneyOptions(results, fastest, cheapest)
+    journeyPaging.timeAdjustments = defaultResponse.searchCriteria?.timeAdjustments
+    renderJourneyOptions(results, journeys)
     resultsSection.hidden = false
-    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    stepControls.hidden = false
+    if (isInitialRequest) {
+      resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
   } catch (error) {
-    if (error instanceof StopIdentificationError) {
-      plannerError.textContent = "Couldn't identify that stop, pick it from the suggestions"
+    if (requestVersion !== journeyPaging.requestVersion || isAbortError(error)) {
+      return
+    }
+
+    abortController.abort()
+    const message = error instanceof StopIdentificationError
+      ? "Couldn't identify that stop, pick it from the suggestions"
+      : 'Routes could not be loaded. Try again.'
+    if (isInitialRequest) {
+      plannerError.textContent = message
     } else {
-      plannerError.textContent = 'Routes could not be loaded. Try again.'
+      stepError.textContent = message
     }
   } finally {
-    setPlanningState(planButton, false)
+    if (requestVersion !== journeyPaging.requestVersion) {
+      return
+    }
+
+    journeyPaging.abortController = undefined
+    if (isInitialRequest) {
+      setPlanningState(planButton, false)
+    }
+    setJourneyStepState(
+      earlierButton,
+      laterButton,
+      journeyPaging.timeAdjustments,
+      false,
+    )
   }
+}
+
+function resetJourneyPaging(
+  state: JourneyPagingState,
+  stepControls: HTMLElement,
+  stepError: HTMLElement,
+  earlierButton: HTMLButtonElement,
+  laterButton: HTMLButtonElement,
+): void {
+  state.requestVersion += 1
+  state.abortController?.abort()
+  state.abortController = undefined
+  state.journeyPath = undefined
+  state.timeAdjustments = undefined
+  stepControls.hidden = true
+  stepError.textContent = ''
+  setJourneyStepState(earlierButton, laterButton, undefined, false)
+}
+
+function setJourneyStepState(
+  earlierButton: HTMLButtonElement,
+  laterButton: HTMLButtonElement,
+  adjustments: JourneyTimeAdjustments | undefined,
+  isLoading: boolean,
+): void {
+  earlierButton.disabled = isLoading || timeAdjustmentParams(adjustments?.earlier) === undefined
+  laterButton.disabled = isLoading || timeAdjustmentParams(adjustments?.later) === undefined
+  earlierButton.classList.toggle('is-loading', isLoading)
+  laterButton.classList.toggle('is-loading', isLoading)
+}
+
+function timeAdjustmentParams(
+  adjustment: JourneyTimeAdjustment | undefined,
+): URLSearchParams | undefined {
+  if (
+    typeof adjustment?.date !== 'string'
+    || adjustment.date === ''
+    || typeof adjustment.time !== 'string'
+    || adjustment.time === ''
+    || typeof adjustment.timeIs !== 'string'
+    || adjustment.timeIs === ''
+  ) {
+    return undefined
+  }
+
+  const params = new URLSearchParams()
+  params.set('date', adjustment.date)
+  params.set('time', adjustment.time)
+  params.set('timeIs', adjustment.timeIs)
+  return params
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function showSelectionError(control: StationControl): void {
@@ -906,8 +1154,11 @@ function withQuery(path: string, params: URLSearchParams): string {
   return query === '' ? path : `${path}?${query}`
 }
 
-async function fetchJourneys(url: string): Promise<JourneyResponse> {
-  const response = await fetch(url)
+async function fetchJourneys(
+  url: string,
+  signal: AbortSignal,
+): Promise<JourneyResponse> {
+  const response = await fetch(url, { signal })
   if (response.status === 300) {
     throw new StopIdentificationError()
   }
@@ -936,73 +1187,123 @@ function validJourneys(journeys: unknown): Journey[] {
   })
 }
 
-function hasFare(journey: Journey): boolean {
-  return typeof journey.fare?.totalCost === 'number'
-    && Number.isFinite(journey.fare.totalCost)
+interface JourneyOption {
+  journey: Journey
+  badges: Array<'Fastest' | 'Cheapest'>
 }
 
-function fareInPence(journey: Journey): number {
-  return journey.fare?.totalCost ?? Number.POSITIVE_INFINITY
+function prepareJourneyOptions(journeys: Journey[]): JourneyOption[] {
+  const byRoute = new Map<string, Journey>()
+  for (const journey of journeys) {
+    const signature = routeSignature(journey)
+    const current = byRoute.get(signature)
+    if (
+      current === undefined
+      || journeyTimestamp(journey.startDateTime) < journeyTimestamp(current.startDateTime)
+    ) {
+      byRoute.set(signature, journey)
+    }
+  }
+
+  const distinctJourneys = [...byRoute.values()].sort((first, second) => (
+    journeyTimestamp(first.arrivalDateTime) - journeyTimestamp(second.arrivalDateTime)
+    || journeyTimestamp(first.startDateTime) - journeyTimestamp(second.startDateTime)
+  ))
+  const fastest = distinctJourneys.reduce<Journey | undefined>((best, journey) => (
+    best === undefined || journey.duration < best.duration ? journey : best
+  ), undefined)
+  const cheapest = distinctJourneys.reduce<Journey | undefined>((best, journey) => {
+    const fare = comparableFareInPence(journey)
+    if (fare === undefined) {
+      return best
+    }
+    return best === undefined || fare < comparableFareInPence(best)!
+      ? journey
+      : best
+  }, undefined)
+
+  return distinctJourneys.map(journey => ({
+    journey,
+    badges: [
+      ...(journey === fastest ? ['Fastest' as const] : []),
+      ...(journey === cheapest ? ['Cheapest' as const] : []),
+    ],
+  }))
+}
+
+function routeSignature(journey: Journey): string {
+  return JSON.stringify(journey.legs.map(leg => [
+    leg.mode?.name ?? '',
+    leg.routeOptions?.[0]?.name ?? '',
+  ]))
+}
+
+function journeyTimestamp(value: string): number {
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
+}
+
+function comparableFareInPence(journey: Journey): number | undefined {
+  if (isWalkingOnly(journey)) {
+    return 0
+  }
+  const totalCost = journey.fare?.totalCost
+  return typeof totalCost === 'number' && Number.isFinite(totalCost)
+    ? totalCost
+    : undefined
+}
+
+function isWalkingOnly(journey: Journey): boolean {
+  return journey.legs.length > 0 && journey.legs.every(leg => {
+    const mode = leg.mode?.name?.toLowerCase()
+    return mode === 'walking' || mode === 'walk'
+  })
 }
 
 function renderJourneyOptions(
   container: HTMLElement,
-  fastest: Journey,
-  cheapest: Journey | undefined,
+  options: JourneyOption[],
 ): void {
-  container.replaceChildren()
-
-  if (cheapest !== undefined && isSameJourney(fastest, cheapest)) {
-    container.append(createJourneyCard('Fastest & cheapest', fastest, 'combined'))
-    return
-  }
-
-  container.append(createJourneyCard('Fastest', fastest, 'fastest'))
-
-  if (cheapest !== undefined) {
-    container.append(createJourneyCard('Cheapest', cheapest, 'cheapest'))
-  } else {
-    const note = document.createElement('p')
-    note.className = 'results-note'
-    note.textContent = 'No fare-priced route was returned. The fastest option is still available.'
-    container.append(note)
-  }
-}
-
-function isSameJourney(first: Journey, second: Journey): boolean {
-  return first.duration === second.duration
-    && first.startDateTime === second.startDateTime
-    && first.arrivalDateTime === second.arrivalDateTime
-    && first.legs.map(legSignature).join('|') === second.legs.map(legSignature).join('|')
-}
-
-function legSignature(leg: JourneyLeg): string {
-  return [
-    leg.mode?.name ?? '',
-    leg.departurePoint?.commonName ?? '',
-    leg.arrivalPoint?.commonName ?? '',
-  ].join(':')
+  container.replaceChildren(...options.map(option => (
+    createJourneyCard(option.journey, option.badges)
+  )))
 }
 
 function createJourneyCard(
-  label: string,
   journey: Journey,
-  variant: 'fastest' | 'cheapest' | 'combined',
+  badges: Array<'Fastest' | 'Cheapest'>,
 ): HTMLElement {
   const card = document.createElement('article')
-  card.className = `journey-card journey-card--${variant}`
+  card.className = 'journey-card'
+  if (badges.includes('Fastest')) {
+    card.classList.add('journey-card--fastest')
+  }
+  if (badges.includes('Cheapest')) {
+    card.classList.add('journey-card--cheapest')
+  }
+  if (badges.length === 2) {
+    card.classList.add('journey-card--combined')
+  }
 
   const header = document.createElement('div')
   header.className = 'journey-card__header'
 
-  const badge = document.createElement('span')
-  badge.className = 'option-badge'
-  badge.textContent = label
+  const badgeList = document.createElement('div')
+  badgeList.className = 'option-badges'
+  badges.forEach(label => {
+    const badge = document.createElement('span')
+    badge.className = `option-badge option-badge--${label.toLowerCase()}`
+    badge.textContent = label
+    badgeList.append(badge)
+  })
+  header.append(badgeList)
 
-  const fare = document.createElement('span')
-  fare.className = 'journey-fare'
-  fare.textContent = formatFare(journey)
-  header.append(badge, fare)
+  if (!isWalkingOnly(journey)) {
+    const fare = document.createElement('span')
+    fare.className = 'journey-fare'
+    fare.textContent = formatFare(journey)
+    header.append(fare)
+  }
 
   const summary = document.createElement('div')
   summary.className = 'journey-summary'
@@ -1024,7 +1325,17 @@ function createJourneyCard(
   legs.setAttribute('aria-label', 'Journey legs')
 
   journey.legs.forEach((leg, index) => {
-    legs.append(createModeChip(leg.mode?.name ?? 'unknown'))
+    const identity = document.createElement('span')
+    identity.className = 'leg-identity'
+    identity.append(createModeChip(leg.mode?.name ?? 'unknown'))
+    const routeName = leg.routeOptions?.[0]?.name?.trim()
+    if (routeName !== undefined && routeName !== '') {
+      const route = document.createElement('span')
+      route.className = 'leg-route-name'
+      route.textContent = routeName
+      identity.append(route)
+    }
+    legs.append(identity)
 
     if (index < journey.legs.length - 1) {
       const change = document.createElement('span')

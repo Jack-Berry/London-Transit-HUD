@@ -124,7 +124,11 @@
       "Bash(curl -s \"https://transit.berrydev.co.uk/geocode?q=hoxton%20hotel%20holborn\")",
       "Bash(curl -s \"https://transit.berrydev.co.uk/tfl/Journey/JourneyResults/1000077/to/51.5172111,-0.1220985\")",
       "Bash(curl -s \"https://transit.berrydev.co.uk/tfl/Journey/JourneyResults/1000077/to/51.5172111,-0.1220985?time=1300&date=20260729&timeIs=departing\")",
-      "Bash(git commit -m 'Plan round K: full journey options, departure stepping, datetime overflow fix \\(T19\\) *)"
+      "Bash(git commit -m 'Plan round K: full journey options, departure stepping, datetime overflow fix \\(T19\\) *)",
+      "Bash(node t19-flow.mjs)",
+      "Bash(sed -i '' \"s|/\\\\^Euston\\\\$/i|/Euston/i|\" t19-flow.mjs)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-t19.png)",
+      "Bash(git commit -m 'Round K: full journey options with departure stepping, datetime overflow fix \\(T19\\) *)"
     ]
   }
 }
