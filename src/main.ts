@@ -6,10 +6,12 @@ import {
   RebuildPageContainer,
 } from '@evenrealities/even_hub_sdk'
 import {
+  fetchJourneyOptionPage,
   initializePhoneUi,
   type Journey,
   type PhoneUiController,
 } from './phone'
+import { getTextWidth, pxTruncate } from '@evenrealities/pretext'
 import {
   ALERT_CONTAINER_WIDTH,
   ALERT_CONTAINER_X,
@@ -23,6 +25,14 @@ import {
 } from './journey-mode'
 import { now, setClockOffsetSeconds } from './clock'
 import { cleanGlassesText } from './glasses-text'
+import {
+  decodeSavedJourney,
+  queryForSavedTiming,
+  routeSignature,
+  SAVED_JOURNEY_KEY,
+  type DecodedSavedJourney,
+  type SavedJourneyRecord,
+} from './saved-journey'
 import './styles.css'
 
 declare global {
@@ -70,6 +80,31 @@ let journeyEndRequest: (() => void) | undefined
 let hudTimerCancelRequest: (() => void) | undefined
 let journeyLiveResetRequest: (() => void) | undefined
 let phoneUiController: PhoneUiController | undefined
+let savedJourney: SavedJourneyRecord | null = null
+let savedJourneyStorageWrite: ((value: string) => Promise<boolean>) | undefined
+let savedPromptStatusRequest:
+  | ((status: 'planning' | 'error') => Promise<void>)
+  | undefined
+let savedPromptDismissRequest: ((showStatusBoard: boolean) => void) | undefined
+let savedJourneyBeginPending: Promise<boolean> | undefined
+let savedJourneyBeginAbortController: AbortController | undefined
+
+function withBridgeTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new BridgeTimeoutError(`${label} timed out after ${BRIDGE_TIMEOUT_MS}ms`)),
+      BRIDGE_TIMEOUT_MS,
+    )
+  })
+
+  return Promise.race([operation, timeout]).finally(() => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
+  })
+}
 
 function restoreJourneyState(saved: unknown): void {
   if (saved === null || typeof saved !== 'object') {
@@ -127,11 +162,19 @@ phoneUiController = initializePhoneUi(
   API_BASE,
   enterJourneyMode,
   endJourneyMode,
+  {
+    save: saveJourneyForLater,
+    begin: beginSavedJourney,
+    remove: removeSavedJourney,
+  },
 )
 if (journeyState.active && journeyState.journey !== null) {
   phoneUiController.showActiveJourney(journeyState.journey)
 }
 const devJourneyLoad = import.meta.env.DEV ? loadDevJourney() : Promise.resolve()
+const devSavedJourneyLoad = import.meta.env.DEV
+  ? loadDevSavedJourney()
+  : Promise.resolve(undefined)
 void initializeApplication().catch(() => {
   console.info('Glasses bridge unavailable')
 })
@@ -167,6 +210,118 @@ function endJourneyMode(): void {
   journeyLiveResetRequest?.()
   console.log('Journey ended')
   journeyEndRequest?.()
+  if (savedJourney !== null) {
+    phoneUiController?.showSavedJourney(savedJourney)
+  }
+}
+
+async function saveJourneyForLater(
+  record: SavedJourneyRecord,
+): Promise<boolean> {
+  const writer = savedJourneyStorageWrite
+  if (writer === undefined) {
+    return false
+  }
+
+  const wasSaved = await writer(JSON.stringify(record))
+  if (!wasSaved) {
+    return false
+  }
+
+  savedJourney = record
+  phoneUiController?.showSavedJourney(record)
+  console.log('Saved journey stored')
+  return true
+}
+
+async function removeSavedJourney(): Promise<boolean> {
+  savedJourneyBeginAbortController?.abort()
+  const writer = savedJourneyStorageWrite
+  if (writer === undefined || !await writer('')) {
+    return false
+  }
+
+  savedJourney = null
+  savedPromptDismissRequest?.(true)
+  phoneUiController?.clearSavedJourney()
+  console.log('Saved journey removed')
+  return true
+}
+
+async function beginSavedJourney(): Promise<boolean> {
+  if (savedJourneyBeginPending !== undefined) {
+    return await savedJourneyBeginPending
+  }
+
+  savedJourneyBeginPending = beginSavedJourneyFresh().finally(() => {
+    savedJourneyBeginPending = undefined
+  })
+  return await savedJourneyBeginPending
+}
+
+async function beginSavedJourneyFresh(): Promise<boolean> {
+  const record = savedJourney
+  if (record === null) {
+    return false
+  }
+
+  try {
+    await savedPromptStatusRequest?.('planning')
+  } catch (error) {
+    console.error('Unable to update the saved journey prompt:', error)
+  }
+
+  const abortController = new AbortController()
+  savedJourneyBeginAbortController = abortController
+  const journeyPath = `${API_BASE}/Journey/JourneyResults/${
+    encodeURIComponent(record.from.endpoint)
+  }/to/${encodeURIComponent(record.to.endpoint)}`
+
+  try {
+    console.log('Refetching saved journey')
+    const page = await fetchJourneyOptionPage(
+      journeyPath,
+      queryForSavedTiming(record.timing, now()),
+      abortController.signal,
+    )
+    const freshJourney = (
+      page.options.find(option => (
+        routeSignature(option.journey) === record.signature
+      ))
+      ?? page.options[0]
+    )?.journey
+    if (freshJourney === undefined) {
+      throw new Error('Saved journey refetch returned no journeys')
+    }
+
+    const writer = savedJourneyStorageWrite
+    const wasCleared = writer === undefined ? false : await writer('')
+    if (!wasCleared) {
+      console.error('Unable to clear the consumed saved journey')
+    }
+    savedJourney = null
+    savedPromptDismissRequest?.(false)
+    phoneUiController?.clearSavedJourney()
+    enterJourneyMode(freshJourney)
+    console.log('Saved journey begun with fresh times')
+    return true
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.log('Saved journey begin cancelled')
+      return false
+    }
+    console.error('Unable to begin saved journey:', error)
+    try {
+      await savedPromptStatusRequest?.('error')
+    } catch (promptError) {
+      console.error('Unable to show the saved journey retry prompt:', promptError)
+    }
+    return false
+  } finally {
+    if (savedJourneyBeginAbortController === abortController) {
+      savedJourneyBeginAbortController = undefined
+    }
+  }
 }
 
 function configureDevClock(): void {
@@ -220,6 +375,62 @@ async function loadDevJourney(): Promise<void> {
     console.log('Dev journey loaded')
   } catch (error) {
     console.error('Unable to load dev journey:', error)
+  }
+}
+
+async function loadDevSavedJourney(): Promise<SavedJourneyRecord | undefined> {
+  const value = new URLSearchParams(window.location.search).get('dev-saved')
+  if (value === null) {
+    return undefined
+  }
+
+  const separator = value.indexOf('/')
+  if (separator <= 0 || separator === value.length - 1) {
+    console.error('Invalid dev-saved value')
+    return undefined
+  }
+
+  const from = value.slice(0, separator)
+  const to = value.slice(separator + 1)
+  const journeyPath = `${API_BASE}/Journey/JourneyResults/${
+    encodeURIComponent(from)
+  }/to/${encodeURIComponent(to)}`
+
+  try {
+    const page = await fetchJourneyOptionPage(
+      journeyPath,
+      new URLSearchParams(),
+      new AbortController().signal,
+    )
+    const journey = page.options[0]?.journey
+    if (journey === undefined) {
+      throw new Error('Dev saved journey response contained no journeys')
+    }
+
+    console.log('Dev saved journey loaded')
+    return {
+      version: 1,
+      savedAt: now(),
+      from: { endpoint: from, label: from },
+      to: { endpoint: to, label: to },
+      timing: { mode: 'now' },
+      signature: routeSignature(journey),
+      journey,
+    }
+  } catch (error) {
+    console.error('Unable to load dev saved journey:', error)
+    return undefined
+  }
+}
+
+async function readSavedJourneyFrom(
+  readValue: () => Promise<string>,
+  atMs: number,
+): Promise<DecodedSavedJourney> {
+  try {
+    return decodeSavedJourney(await readValue(), atMs)
+  } catch {
+    return { expired: false }
   }
 }
 
@@ -457,9 +668,135 @@ function createHiddenContainers(alertContent: string): TextContainerProperty[] {
   ]
 }
 
+function createSavedJourneyContainers(
+  record: SavedJourneyRecord,
+): TextContainerProperty[] {
+  const title = savedPromptLine('Saved journey')
+  const route = savedPromptLine(`${record.from.label} → ${record.to.label}`)
+  return [
+    new TextContainerProperty({
+      xPosition: title.xPosition,
+      yPosition: 54,
+      width: title.width,
+      height: 27,
+      borderWidth: 0,
+      borderColor: 5,
+      paddingLength: 0,
+      containerID: 1,
+      containerName: 'saved-title',
+      content: title.content,
+      isEventCapture: 0,
+    }),
+    new TextContainerProperty({
+      xPosition: route.xPosition,
+      yPosition: 126,
+      width: route.width,
+      height: 27,
+      borderWidth: 0,
+      borderColor: 5,
+      paddingLength: 0,
+      containerID: 2,
+      containerName: 'saved-route',
+      content: route.content,
+      isEventCapture: 0,
+    }),
+    new TextContainerProperty({
+      xPosition: 4,
+      yPosition: 207,
+      width: 568,
+      height: 27,
+      borderWidth: 0,
+      borderColor: 5,
+      paddingLength: 0,
+      containerID: 3,
+      containerName: 'saved-hint',
+      content: savedPromptFixedContent('ready'),
+      isEventCapture: 1,
+    }),
+  ]
+}
+
+function savedPromptLine(content: string): {
+  content: string
+  xPosition: number
+  width: number
+} {
+  const fitted = pxTruncate(cleanGlassesText(content), 568)
+  const width = Math.max(1, Math.ceil(getTextWidth(fitted)))
+  return {
+    content: fitted,
+    xPosition: Math.max(0, Math.floor((576 - width) / 2)),
+    width,
+  }
+}
+
+function savedPromptContent(
+  status: 'ready' | 'planning' | 'error',
+): string {
+  if (status === 'planning') {
+    return 'Planning...'
+  }
+  if (status === 'error') {
+    return "Couldn't plan · tap to retry"
+  }
+  return 'Tap: begin   Swipe: skip   2x tap: exit'
+}
+
+function savedPromptFixedContent(
+  status: 'ready' | 'planning' | 'error',
+): string {
+  const fitted = pxTruncate(
+    cleanGlassesText(savedPromptContent(status)),
+    568,
+  )
+  const spaceWidth = getTextWidth(' ')
+  let leadingSpaces = Math.max(
+    0,
+    Math.floor(((568 - getTextWidth(fitted)) / 2) / spaceWidth),
+  )
+  let content = `${' '.repeat(leadingSpaces)}${fitted}`
+  while (leadingSpaces > 0 && getTextWidth(content) > 568) {
+    leadingSpaces -= 1
+    content = `${' '.repeat(leadingSpaces)}${fitted}`
+  }
+  return content
+}
+
 async function initializeGlasses(): Promise<void> {
   const bridge = await waitForEvenAppBridge()
   const dismissedAlertKeys = new Set<string>()
+  const devSavedJourney = await devSavedJourneyLoad
+  const decodedSavedJourney = await readSavedJourneyFrom(
+    devSavedJourney === undefined
+      ? async () => {
+        const rawRead = bridge.getLocalStorage(SAVED_JOURNEY_KEY)
+        try {
+          return await withBridgeTimeout(rawRead, 'getLocalStorage')
+        } catch (error) {
+          await rawRead.catch(() => undefined)
+          throw error
+        }
+      }
+      : () => Promise.resolve(JSON.stringify(devSavedJourney)),
+    now(),
+  )
+  savedJourney = decodedSavedJourney.record ?? null
+  if (decodedSavedJourney.expired) {
+    const rawClear = bridge.setLocalStorage(SAVED_JOURNEY_KEY, '')
+    try {
+      await withBridgeTimeout(
+        rawClear,
+        'expired saved journey setLocalStorage',
+      )
+    } catch (error) {
+      await rawClear.catch(() => undefined)
+      console.info('Unable to clear expired saved journey:', error)
+    }
+  }
+
+  if (savedJourney !== null && !journeyState.active) {
+    phoneUiController?.showSavedJourney(savedJourney)
+  }
 
   function currentAlertContainerContent(atMs = now()): string {
     if (!journeyState.active || journeyState.journey === null) {
@@ -489,28 +826,16 @@ async function initializeGlasses(): Promise<void> {
   const startupJourneyVersion = initialStagePage === undefined
     ? undefined
     : journeyStateVersion
+  const startupSavedJourney = initialStagePage === undefined
+    ? savedJourney
+    : null
   const startupContainers = initialStagePage === undefined
-    ? createStatusContainers()
+    ? startupSavedJourney === null
+      ? createStatusContainers()
+      : createSavedJourneyContainers(startupSavedJourney)
     : journeyState.hudHidden
       ? createHiddenContainers(startupAlertContent)
       : createStageContainers(initialStagePage, startupAlertContent)
-
-  function withBridgeTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(
-        () => reject(new BridgeTimeoutError(`${label} timed out after ${BRIDGE_TIMEOUT_MS}ms`)),
-        BRIDGE_TIMEOUT_MS,
-      )
-    })
-
-    return Promise.race([operation, timeout]).finally(() => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId)
-      }
-    })
-  }
 
   const result = await withBridgeTimeout(
     bridge.createStartUpPageContainer(
@@ -550,6 +875,7 @@ async function initializeGlasses(): Promise<void> {
   let renderedBarContent = desiredBarContent
   let liveUpdateQueued = false
   let liveUpdateInFlight = false
+  let savedPromptVisible = startupSavedJourney !== null
 
   function startBridgeCall<T>(
     label: string,
@@ -578,6 +904,68 @@ async function initializeGlasses(): Promise<void> {
       }
     }).catch(() => undefined)
     return rawBridgeCall
+  }
+
+  async function writeSavedJourneyStorage(value: string): Promise<boolean> {
+    const rawBridgeCall = startBridgeCall(
+      'Saved journey storage write',
+      () => bridge.setLocalStorage(SAVED_JOURNEY_KEY, value),
+    )
+    if (rawBridgeCall === undefined) {
+      return false
+    }
+
+    try {
+      return await withBridgeTimeout(
+        rawBridgeCall,
+        'saved journey setLocalStorage',
+      )
+    } catch (error) {
+      console.error('Unable to write the saved journey:', error)
+      return false
+    }
+  }
+
+  async function updateSavedPromptStatus(
+    status: 'planning' | 'error',
+  ): Promise<void> {
+    if (!savedPromptVisible) {
+      return
+    }
+
+    const rawBridgeCall = startBridgeCall(
+      'Saved journey prompt update',
+      () => bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: 3,
+          containerName: 'saved-hint',
+          content: savedPromptFixedContent(status),
+          contentOffset: 0,
+          contentLength: 0,
+        }),
+      ),
+    )
+    if (rawBridgeCall === undefined) {
+      return
+    }
+
+    const wasUpdated = await withBridgeTimeout(
+      rawBridgeCall,
+      'saved prompt textContainerUpgrade',
+    )
+    if (!wasUpdated) {
+      throw new Error('Saved journey prompt update failed')
+    }
+  }
+
+  savedJourneyStorageWrite = writeSavedJourneyStorage
+  savedPromptStatusRequest = updateSavedPromptStatus
+  savedPromptDismissRequest = showStatusBoard => {
+    const wasVisible = savedPromptVisible
+    savedPromptVisible = false
+    if (showStatusBoard && wasVisible) {
+      requestStatusBoardRender()
+    }
   }
 
   function formatBoard(lines: TflLineStatus[]): string {
@@ -648,7 +1036,7 @@ async function initializeGlasses(): Promise<void> {
   }
 
   async function refreshStatuses(): Promise<void> {
-    if (journeyState.active) {
+    if (journeyState.active || savedPromptVisible) {
       return
     }
 
@@ -912,6 +1300,7 @@ async function initializeGlasses(): Promise<void> {
   }
 
   function requestJourneyRender(): void {
+    savedPromptVisible = false
     cancelHiddenNoticeTimer()
     pauseRefreshInterval()
     journeyRenderQueued = true
@@ -921,6 +1310,10 @@ async function initializeGlasses(): Promise<void> {
   }
 
   function requestStatusBoardRender(): void {
+    if (savedPromptVisible) {
+      savedJourneyBeginAbortController?.abort()
+    }
+    savedPromptVisible = false
     cancelHiddenNoticeTimer()
     stopJourneyTick()
     journeyRenderQueued = false
@@ -1118,6 +1511,7 @@ async function initializeGlasses(): Promise<void> {
       return
     }
 
+    savedJourneyBeginAbortController?.abort()
     cancelHiddenNoticeTimer()
     console.log('Calling shutDownPageContainer(1)')
     exitRequestQueued = true
@@ -1164,12 +1558,18 @@ async function initializeGlasses(): Promise<void> {
         if (type === 1) {
           if (journeyState.active) {
             moveJourneyStage(1)
+          } else if (savedPromptVisible) {
+            console.log('Saved journey prompt skipped')
+            requestStatusBoardRender()
           } else {
             console.log('Swipe up')
           }
         } else if (type === 2) {
           if (journeyState.active) {
             moveJourneyStage(-1)
+          } else if (savedPromptVisible) {
+            console.log('Saved journey prompt skipped')
+            requestStatusBoardRender()
           } else {
             console.log('Swipe down')
           }
@@ -1180,6 +1580,8 @@ async function initializeGlasses(): Promise<void> {
         if (type === 0) {
           if (journeyState.active) {
             toggleJourneyHud()
+          } else if (savedPromptVisible) {
+            void beginSavedJourney()
           } else {
             console.log('Single tap')
           }
@@ -1189,6 +1591,8 @@ async function initializeGlasses(): Promise<void> {
           console.log('Foreground entered')
           if (journeyState.active) {
             journeyRenderRequest?.()
+          } else if (savedPromptVisible) {
+            console.log('Saved journey prompt remains visible')
           } else {
             void refreshStatuses()
             startRefreshInterval()
@@ -1206,6 +1610,11 @@ async function initializeGlasses(): Promise<void> {
           journeyEndRequest = undefined
           hudTimerCancelRequest = undefined
           journeyLiveResetRequest = undefined
+          savedJourneyStorageWrite = undefined
+          savedPromptStatusRequest = undefined
+          savedPromptDismissRequest = undefined
+          savedJourneyBeginAbortController?.abort()
+          savedJourneyBeginAbortController = undefined
           unsubscribe()
         }
       }
@@ -1222,6 +1631,9 @@ async function initializeGlasses(): Promise<void> {
       } else {
         requestJourneyRender()
       }
+    } else if (savedPromptVisible) {
+      pauseRefreshInterval()
+      console.log('Saved journey prompt shown')
     } else {
       await refreshStatuses()
       startRefreshInterval()

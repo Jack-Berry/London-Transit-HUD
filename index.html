@@ -25,6 +25,27 @@
         <h1 class="brand-title">London Transit HUD</h1>
         </header>
 
+        <aside
+          id="saved-journey-banner"
+          class="saved-journey-banner"
+          aria-labelledby="saved-journey-title"
+          hidden
+        >
+          <div>
+            <p id="saved-journey-title" class="step-label">Saved journey</p>
+            <p id="saved-journey-route" class="saved-journey-route"></p>
+            <p
+              id="saved-journey-status"
+              class="saved-journey-status"
+              role="status"
+            ></p>
+          </div>
+          <div class="saved-journey-actions">
+            <button id="begin-saved-journey-button" type="button">Begin</button>
+            <button id="remove-saved-journey-button" type="button">Remove</button>
+          </div>
+        </aside>
+
         <section class="planner-panel" aria-labelledby="planner-title">
         <div class="section-heading">
           <div>

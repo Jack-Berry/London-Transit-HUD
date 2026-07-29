@@ -5,6 +5,13 @@ import {
   estimatedRideStopTimes,
   type JourneyStage,
 } from './journey-mode'
+import {
+  routeSignature,
+  timingFromQuery,
+  type SavedJourneyEndpoint,
+  type SavedJourneyRecord,
+  type SavedJourneyTiming,
+} from './saved-journey'
 
 interface StationMatch {
   id: string
@@ -122,6 +129,10 @@ interface JourneyTimeAdjustments {
 
 interface JourneyPagingState {
   journeyPath?: string
+  saveEndpoints?: {
+    from: SavedJourneyEndpoint
+    to: SavedJourneyEndpoint
+  }
   timeAdjustments?: JourneyTimeAdjustments
   abortController?: AbortController
   requestVersion: number
@@ -159,12 +170,21 @@ let journeySelectionHandler: (journey: Journey) => void = () => undefined
 export interface PhoneUiController {
   showActiveJourney: (journey: Journey) => void
   resetPlanner: () => void
+  showSavedJourney: (record: SavedJourneyRecord) => void
+  clearSavedJourney: () => void
+}
+
+export interface SavedJourneyActions {
+  save: (record: SavedJourneyRecord) => Promise<boolean>
+  begin: () => Promise<boolean>
+  remove: () => Promise<boolean>
 }
 
 export function initializePhoneUi(
   apiBase: string,
   onJourneySelected: (journey: Journey) => void,
   onJourneyEnded: () => void,
+  savedJourneyActions: SavedJourneyActions,
 ): PhoneUiController {
   const appShell = getElement<HTMLElement>('app-shell')
   const plannerView = getElement<HTMLElement>('planner-view')
@@ -172,6 +192,15 @@ export function initializePhoneUi(
   const activeSummary = getElement<HTMLElement>('active-journey-summary')
   const activeStageList = getElement<HTMLOListElement>('active-stage-list')
   const endJourneyButton = getElement<HTMLButtonElement>('end-journey-button')
+  const savedJourneyBanner = getElement<HTMLElement>('saved-journey-banner')
+  const savedJourneyRoute = getElement<HTMLElement>('saved-journey-route')
+  const savedJourneyStatus = getElement<HTMLElement>('saved-journey-status')
+  const beginSavedJourneyButton = getElement<HTMLButtonElement>(
+    'begin-saved-journey-button',
+  )
+  const removeSavedJourneyButton = getElement<HTMLButtonElement>(
+    'remove-saved-journey-button',
+  )
   const form = getElement<HTMLFormElement>('journey-form')
   const fromControl = createStationControl('from', appShell)
   const toControl = createStationControl('to', appShell)
@@ -194,6 +223,7 @@ export function initializePhoneUi(
   }
   let activeJourney: Journey | undefined
   let activeJourneyInterval: ReturnType<typeof setInterval> | undefined
+  let savedJourney: SavedJourneyRecord | undefined
 
   datetimeInput.min = toDatetimeLocalValue(new Date(now()))
   datetimeInput.value = toDatetimeLocalValue(nextHalfHour())
@@ -342,6 +372,21 @@ export function initializePhoneUi(
     activeJourneyInterval = setInterval(updateActiveStage, 10_000)
   }
 
+  const showSavedJourney = (record: SavedJourneyRecord): void => {
+    savedJourney = record
+    savedJourneyRoute.textContent = `${record.from.label} → ${record.to.label}`
+    savedJourneyStatus.textContent = ''
+    savedJourneyBanner.hidden = false
+  }
+
+  const clearSavedJourney = (): void => {
+    savedJourney = undefined
+    savedJourneyRoute.textContent = ''
+    savedJourneyStatus.textContent = ''
+    savedJourneyBanner.hidden = true
+    setSavedBannerBusy(beginSavedJourneyButton, removeSavedJourneyButton, false)
+  }
+
   const resetPlanner = (): void => {
     stopActiveJourneyTick()
     activeJourney = undefined
@@ -393,6 +438,48 @@ export function initializePhoneUi(
     resetPlanner()
   })
 
+  beginSavedJourneyButton.addEventListener('click', () => {
+    if (savedJourney === undefined) {
+      return
+    }
+    setSavedBannerBusy(beginSavedJourneyButton, removeSavedJourneyButton, true)
+    savedJourneyStatus.textContent = 'Planning your saved journey…'
+    void savedJourneyActions.begin().then(didBegin => {
+      if (!didBegin && savedJourney !== undefined) {
+        savedJourneyStatus.textContent = "Couldn't plan this journey. Try again."
+      }
+    }).catch(() => {
+      if (savedJourney !== undefined) {
+        savedJourneyStatus.textContent = "Couldn't plan this journey. Try again."
+      }
+    }).finally(() => {
+      if (savedJourney !== undefined) {
+        setSavedBannerBusy(beginSavedJourneyButton, removeSavedJourneyButton, false)
+      }
+    })
+  })
+
+  removeSavedJourneyButton.addEventListener('click', () => {
+    if (savedJourney === undefined) {
+      return
+    }
+    setSavedBannerBusy(beginSavedJourneyButton, removeSavedJourneyButton, true)
+    savedJourneyStatus.textContent = 'Removing…'
+    void savedJourneyActions.remove().then(wasRemoved => {
+      if (!wasRemoved && savedJourney !== undefined) {
+        savedJourneyStatus.textContent = "Couldn't remove this journey. Try again."
+      }
+    }).catch(() => {
+      if (savedJourney !== undefined) {
+        savedJourneyStatus.textContent = "Couldn't remove this journey. Try again."
+      }
+    }).finally(() => {
+      if (savedJourney !== undefined) {
+        setSavedBannerBusy(beginSavedJourneyButton, removeSavedJourneyButton, false)
+      }
+    })
+  })
+
   document.addEventListener('pointerdown', event => {
     const target = event.target
     if (!(target instanceof Node)) {
@@ -431,6 +518,7 @@ export function initializePhoneUi(
       earlierButton,
       laterButton,
       journeyPaging,
+      savedJourneyActions,
     })
   })
 
@@ -445,6 +533,7 @@ export function initializePhoneUi(
       earlierButton,
       laterButton,
       journeyPaging,
+      savedJourneyActions,
     })
   })
 
@@ -459,13 +548,25 @@ export function initializePhoneUi(
       earlierButton,
       laterButton,
       journeyPaging,
+      savedJourneyActions,
     })
   })
 
   return {
     showActiveJourney,
     resetPlanner,
+    showSavedJourney,
+    clearSavedJourney,
   }
+}
+
+function setSavedBannerBusy(
+  beginButton: HTMLButtonElement,
+  removeButton: HTMLButtonElement,
+  isBusy: boolean,
+): void {
+  beginButton.disabled = isBusy
+  removeButton.disabled = isBusy
 }
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -878,6 +979,7 @@ interface PlanJourneyOptions {
   earlierButton: HTMLButtonElement
   laterButton: HTMLButtonElement
   journeyPaging: JourneyPagingState
+  savedJourneyActions: SavedJourneyActions
 }
 
 async function planJourney(options: PlanJourneyOptions): Promise<void> {
@@ -896,6 +998,7 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
     earlierButton,
     laterButton,
     journeyPaging,
+    savedJourneyActions,
   } = options
 
   plannerError.textContent = ''
@@ -931,6 +1034,16 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
     encodeURIComponent(fromControl.selected.endpoint)
   }/to/${encodeURIComponent(toControl.selected.endpoint)}`
   journeyPaging.journeyPath = journeyPath
+  journeyPaging.saveEndpoints = {
+    from: {
+      endpoint: fromControl.selected.endpoint,
+      label: fromControl.selected.name,
+    },
+    to: {
+      endpoint: toControl.selected.endpoint,
+      label: toControl.selected.name,
+    },
+  }
 
   await loadJourneyPage(timingParams, true, {
     plannerError,
@@ -942,6 +1055,7 @@ async function planJourney(options: PlanJourneyOptions): Promise<void> {
     earlierButton,
     laterButton,
     journeyPaging,
+    savedJourneyActions,
   })
 }
 
@@ -955,6 +1069,7 @@ interface JourneyPageOptions {
   earlierButton: HTMLButtonElement
   laterButton: HTMLButtonElement
   journeyPaging: JourneyPagingState
+  savedJourneyActions: SavedJourneyActions
 }
 
 async function stepJourneyPage(
@@ -985,6 +1100,7 @@ async function loadJourneyPage(
     earlierButton,
     laterButton,
     journeyPaging,
+    savedJourneyActions,
   } = options
   const journeyPath = journeyPaging.journeyPath
   if (journeyPath === undefined) {
@@ -996,11 +1112,6 @@ async function loadJourneyPage(
   const abortController = new AbortController()
   journeyPaging.abortController = abortController
 
-  const defaultUrl = withQuery(journeyPath, timingParams)
-  const busParams = new URLSearchParams(timingParams)
-  busParams.set('mode', 'bus')
-  const busUrl = withQuery(journeyPath, busParams)
-
   plannerError.textContent = ''
   stepError.textContent = ''
   setJourneyStepState(earlierButton, laterButton, undefined, true)
@@ -1009,18 +1120,16 @@ async function loadJourneyPage(
   }
 
   try {
-    const [defaultResponse, busResponse] = await Promise.all([
-      fetchJourneys(defaultUrl, abortController.signal),
-      fetchJourneys(busUrl, abortController.signal),
-    ])
+    const page = await fetchJourneyOptionPage(
+      journeyPath,
+      timingParams,
+      abortController.signal,
+    )
     if (requestVersion !== journeyPaging.requestVersion) {
       return
     }
 
-    const journeys = prepareJourneyOptions([
-      ...validJourneys(defaultResponse.journeys),
-      ...validJourneys(busResponse.journeys),
-    ])
+    const journeys = page.options
     if (journeys.length === 0) {
       const message = 'No routes found'
       if (isInitialRequest) {
@@ -1031,8 +1140,19 @@ async function loadJourneyPage(
       return
     }
 
-    journeyPaging.timeAdjustments = defaultResponse.searchCriteria?.timeAdjustments
-    renderJourneyOptions(results, journeys)
+    journeyPaging.timeAdjustments = page.timeAdjustments
+    const saveEndpoints = journeyPaging.saveEndpoints
+    renderJourneyOptions(
+      results,
+      journeys,
+      saveEndpoints === undefined
+        ? undefined
+        : {
+          ...saveEndpoints,
+          timing: timingFromQuery(timingParams),
+        },
+      savedJourneyActions,
+    )
     resultsSection.hidden = false
     stepControls.hidden = false
     if (isInitialRequest) {
@@ -1081,6 +1201,7 @@ function resetJourneyPaging(
   state.abortController?.abort()
   state.abortController = undefined
   state.journeyPath = undefined
+  state.saveEndpoints = undefined
   state.timeAdjustments = undefined
   stepControls.hidden = true
   stepError.textContent = ''
@@ -1154,6 +1275,34 @@ function withQuery(path: string, params: URLSearchParams): string {
   return query === '' ? path : `${path}?${query}`
 }
 
+export interface JourneyOptionPage {
+  options: JourneyOption[]
+  timeAdjustments?: JourneyTimeAdjustments
+}
+
+export async function fetchJourneyOptionPage(
+  journeyPath: string,
+  timingParams: URLSearchParams,
+  signal: AbortSignal,
+): Promise<JourneyOptionPage> {
+  const defaultUrl = withQuery(journeyPath, timingParams)
+  const busParams = new URLSearchParams(timingParams)
+  busParams.set('mode', 'bus')
+  const busUrl = withQuery(journeyPath, busParams)
+  const [defaultResponse, busResponse] = await Promise.all([
+    fetchJourneys(defaultUrl, signal),
+    fetchJourneys(busUrl, signal),
+  ])
+
+  return {
+    options: prepareJourneyOptions([
+      ...validJourneys(defaultResponse.journeys),
+      ...validJourneys(busResponse.journeys),
+    ]),
+    timeAdjustments: defaultResponse.searchCriteria?.timeAdjustments,
+  }
+}
+
 async function fetchJourneys(
   url: string,
   signal: AbortSignal,
@@ -1187,7 +1336,7 @@ function validJourneys(journeys: unknown): Journey[] {
   })
 }
 
-interface JourneyOption {
+export interface JourneyOption {
   journey: Journey
   badges: Array<'Fastest' | 'Cheapest'>
 }
@@ -1231,13 +1380,6 @@ function prepareJourneyOptions(journeys: Journey[]): JourneyOption[] {
   }))
 }
 
-function routeSignature(journey: Journey): string {
-  return JSON.stringify(journey.legs.map(leg => [
-    leg.mode?.name ?? '',
-    leg.routeOptions?.[0]?.name ?? '',
-  ]))
-}
-
 function journeyTimestamp(value: string): number {
   const timestamp = new Date(value).getTime()
   return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
@@ -1245,10 +1387,12 @@ function journeyTimestamp(value: string): number {
 
 function comparableFareInPence(journey: Journey): number | undefined {
   if (isWalkingOnly(journey)) {
-    return 0
+    return undefined
   }
   const totalCost = journey.fare?.totalCost
-  return typeof totalCost === 'number' && Number.isFinite(totalCost)
+  return typeof totalCost === 'number'
+    && Number.isFinite(totalCost)
+    && totalCost > 0
     ? totalCost
     : undefined
 }
@@ -1263,15 +1407,30 @@ function isWalkingOnly(journey: Journey): boolean {
 function renderJourneyOptions(
   container: HTMLElement,
   options: JourneyOption[],
+  saveContext: JourneySaveContext | undefined,
+  savedJourneyActions: SavedJourneyActions,
 ): void {
   container.replaceChildren(...options.map(option => (
-    createJourneyCard(option.journey, option.badges)
+    createJourneyCard(
+      option.journey,
+      option.badges,
+      saveContext,
+      savedJourneyActions,
+    )
   )))
+}
+
+interface JourneySaveContext {
+  from: SavedJourneyEndpoint
+  to: SavedJourneyEndpoint
+  timing: SavedJourneyTiming
 }
 
 function createJourneyCard(
   journey: Journey,
   badges: Array<'Fastest' | 'Cheapest'>,
+  saveContext: JourneySaveContext | undefined,
+  savedJourneyActions: SavedJourneyActions,
 ): HTMLElement {
   const card = document.createElement('article')
   card.className = 'journey-card'
@@ -1366,7 +1525,50 @@ function createJourneyCard(
     goButton.firstElementChild!.textContent = 'Route selected'
   })
 
-  card.append(header, summary, legs, goButton)
+  const saveButton = document.createElement('button')
+  saveButton.type = 'button'
+  saveButton.className = 'save-journey-button'
+  saveButton.textContent = 'Save for later'
+  saveButton.disabled = saveContext === undefined
+
+  const actions = document.createElement('div')
+  actions.className = 'journey-card__actions'
+  actions.append(goButton, saveButton)
+
+  const saveStatus = document.createElement('p')
+  saveStatus.className = 'save-journey-status'
+  saveStatus.setAttribute('role', 'status')
+
+  saveButton.addEventListener('click', () => {
+    if (saveContext === undefined) {
+      return
+    }
+
+    saveButton.disabled = true
+    saveButton.textContent = 'Saving…'
+    saveStatus.textContent = ''
+    const record: SavedJourneyRecord = {
+      version: 1,
+      savedAt: now(),
+      from: saveContext.from,
+      to: saveContext.to,
+      timing: saveContext.timing,
+      signature: routeSignature(journey),
+      journey,
+    }
+    void savedJourneyActions.save(record).then(wasSaved => {
+      saveStatus.textContent = wasSaved
+        ? 'Saved for later'
+        : 'Saving needs the Even app'
+    }).catch(() => {
+      saveStatus.textContent = 'Saving needs the Even app'
+    }).finally(() => {
+      saveButton.disabled = false
+      saveButton.textContent = 'Save for later'
+    })
+  })
+
+  card.append(header, summary, legs, actions, saveStatus)
   return card
 }
 

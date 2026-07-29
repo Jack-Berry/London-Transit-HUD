@@ -156,6 +156,72 @@ p {
   padding: 22px 18px 18px;
 }
 
+.saved-journey-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #b9d8c6;
+  border-radius: 18px;
+  background: var(--accent-tint);
+}
+
+.saved-journey-banner .step-label {
+  margin-bottom: 5px;
+}
+
+.saved-journey-route {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.saved-journey-status {
+  min-height: 1.2em;
+  margin: 5px 0 0;
+  color: #4f5954;
+  font-size: 0.72rem;
+}
+
+.saved-journey-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.saved-journey-actions button,
+.save-journey-button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #8eaaa0;
+  border-radius: 11px;
+  color: var(--accent-strong);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.saved-journey-actions button:hover,
+.saved-journey-actions button:focus-visible,
+.save-journey-button:hover,
+.save-journey-button:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  background: #dbeee2;
+}
+
+.saved-journey-actions button:disabled,
+.save-journey-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .section-heading {
   display: flex;
   align-items: flex-start;
@@ -468,6 +534,7 @@ input[data-selected="true"] + .input-state {
 }
 
 .app-shell.search-active .hero,
+.app-shell.search-active .saved-journey-banner,
 .app-shell.search-active .planner-panel > .section-heading,
 .app-shell.search-active .route-line,
 .app-shell.search-active #journey-form > :not(.route-fields),
@@ -941,13 +1008,31 @@ input[data-selected="true"] + .input-state {
 
 .go-button {
   min-height: 46px;
-  margin-top: 18px;
   padding: 0 14px;
   border: 1px solid var(--accent);
   color: #ffffff;
   background: var(--accent);
   font-size: 0.82rem;
   font-weight: 720;
+}
+
+.journey-card__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.save-journey-button {
+  min-height: 46px;
+}
+
+.save-journey-status {
+  min-height: 1.2em;
+  margin: 7px 0 -4px;
+  color: #4f5954;
+  font-size: 0.72rem;
+  text-align: right;
 }
 
 .go-button.is-selected {
@@ -1371,6 +1456,17 @@ input[data-selected="true"] + .input-state {
 
   .active-stage {
     padding: 20px;
+  }
+}
+
+@media (max-width: 380px) {
+  .saved-journey-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .saved-journey-actions button {
+    flex: 1 1 0;
   }
 }
 

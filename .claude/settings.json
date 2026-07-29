@@ -128,7 +128,13 @@
       "Bash(node t19-flow.mjs)",
       "Bash(sed -i '' \"s|/\\\\^Euston\\\\$/i|/Euston/i|\" t19-flow.mjs)",
       "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-t19.png)",
-      "Bash(git commit -m 'Round K: full journey options with departure stepping, datetime overflow fix \\(T19\\) *)"
+      "Bash(git commit -m 'Round K: full journey options with departure stepping, datetime overflow fix \\(T19\\) *)",
+      "Bash(git commit -m 'Plan round L: cheapest-badge correction and saved journey with glasses prompt \\(T20, T21\\) *)",
+      "Bash(node t20-21-flow.mjs)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-prompt.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-after-begin.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-skip.png)",
+      "Bash(git commit -m 'Round L: priced-only Cheapest badge and the saved journey \\(T20, T21\\) *)"
     ]
   }
 }
