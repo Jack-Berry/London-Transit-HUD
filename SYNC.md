@@ -737,6 +737,49 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **medium.** The interpolation and normalizer patterns both exist; this is a new component in an established view, with care needed on the tick/expansion interaction.
 
+### 2026-07-29 — Round J: the phone restyle (T18), Jack's references are in
+
+Jack's reference stills are committed under `design/` (phone screens from his Genesis Remote app in three accent variants). **Read his brief carefully, it is about values, not branding:** do NOT copy that app's style, colours or components. What the stills demonstrate is the target *lightness*: a warm off-white page, white surfaces with hairline borders, near-black text, one accent used sparingly, everything flat and solid. That reads well in bright daylight, which is where a transit app actually gets used. Jack's summary: **lighter design, static colours.** The current layout, structure and general character are "pretty good" and stay.
+
+#### T18 — Light, solid, high-contrast skin
+
+**Scope guard:** this is a skin, not a rebuild. `src/styles.css` is the whole battlefield. No markup restructuring, no ARIA changes, no JS behaviour changes; every existing class name that scripts or tests rely on (`search-active`, `is-live`, `is-done`, `is-next`, `active-stage--ride`, `stop-disclosure`, etc.) keeps its name. If a styling hook is genuinely missing, a minimal class addition in markup is permitted with justification in your notes; expect not to need one. Glasses code untouched.
+
+**Palette (define as CSS custom properties, all solid):**
+
+- Page background: warm off-white, in the spirit of the stills (Sol's judgement on the exact value, something around the `#F5F3EE` neighbourhood).
+- Surfaces (cards, inputs, suggestion overlay): white with a subtle warm-grey hairline border. The suggestions overlay must stay clearly a layer (solid background, soft shadow) since it overlays content by design.
+- Text: near-black primary, warm grey secondary. Small uppercase letter-spaced micro-labels (the stills do this well and our design already has the pattern in the summary strip and eyebrows).
+- Accent: KEEP the app's green transit identity, translated for light backgrounds: a deep solid green with enough weight to read as the brand (must pass contrast, below). The neon mint/lime pair can survive inside the permitted accent details only.
+- End journey: solid muted red treatment that reads on white.
+- Mode chips keep one distinct solid colour per mode (Jack's standing requirement); adjust each for legibility on light surfaces (solid fill with white or near-black label as contrast demands).
+
+**The gradient rule (Jack's explicit direction):** gradients survive only as light accents, never as a dominant feature. Concretely, in the current sheet:
+
+- KEEP `.route-stem` (the mint-to-lime line between the From and To dots): Jack singled this out as the good example.
+- `.journey-card--combined::before` (the hairline stripe on the combined fastest-and-cheapest card) may keep a gradient: it is exactly the accent scale Jack means. Sol's judgement.
+- REMOVE all others: the body radial washes, the panel and active-card `linear-gradient` fills, and the `.primary-action` button gradient. Backgrounds and buttons become solid colours.
+
+**Component notes:**
+
+- Primary buttons (Compare routes, Go): one consistent solid treatment, either the deep accent green with white text or near-black with white text, Sol picks one and uses it everywhere primary. Secondary actions (Cancel, disclosure) become outlined or quiet solid.
+- Journey option cards and active-stage cards: white, hairline border, solid; the live stage gets a solid accent border and a very light solid accent tint, no gradient fill. Done/next stop states in the T17 list must be MORE distinct than today, not less: bright-light legibility is the whole point of this round.
+- Search takeover and error states restyled consistently; `:focus-visible` outlines must remain clearly visible on light (dark outline).
+- Box shadows: soften to the near-invisible ambient level the stills use; no glowing colour shadows.
+
+**Contrast discipline (acceptance-critical):** every routine text/background pair — body text, secondary text, button labels, chip labels, suggestion rows, summary strip, done/next/pending stop rows, error text — must compute to WCAG AA (4.5:1 normal text, 3:1 for large/bold display text). List the main pairs with their computed ratios in your Execution notes; do not eyeball it.
+
+Acceptance criteria:
+
+- Builds and standing greps pass; diff confined to `src/styles.css` (plus justified minimal class hooks); no TS logic changes.
+- Grep the shipped CSS for `gradient`: only the approved accent occurrences remain (route stem, and optionally the combined-card hairline).
+- The T16 and T17 Playwright suites still pass unmodified (they assert structure and class names, so they double as the no-behaviour-change proof; lead runs them).
+- Screenshot matrix at 390x660 (planner, search takeover, options cards, active collapsed, active expanded with progress) reads as a light app, no dark-theme remnants (stray dark surfaces, unreadable pale text), lead compares against the dark baselines on file.
+- Contrast table present in Execution notes, all pairs passing.
+- Desktop width unaffected structurally; full flow completes at both sizes with zero page errors.
+
+Effort recommendation for Jack: **high.** The judgement calls (exact palette values, chip colours on light, live/done/next state treatments) are the work; the mechanics are one stylesheet.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
