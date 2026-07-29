@@ -825,6 +825,69 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** This reshapes the product's core choice screen; the stepping state machine and dedupe need care, and the design judgement on card density is real.
 
+### 2026-07-29 — Round L: cheapest-badge correction and the saved journey (T20, T21)
+
+Jack's direction after the round K review: walking must never take the Cheapest badge (Cheapest means the lowest-priced option costing more than £0), and he wants the planned-for-later feature now: save a route, and on next app open be offered "begin your saved journey?", so a pre-planned journey can be run entirely from the glasses and ring without opening the phone.
+
+**Platform facts for this round (lead-verified against installed `@evenrealities/even_hub_sdk@0.0.12`):**
+
+- The ONLY persistence that survives app restarts in the Even WebView is the bridge KV store. Browser `localStorage`/`indexedDB` remain banned (they silently lose data; standing rule since milestone 1). The contract, verbatim from the installed typings:
+
+```typescript
+setLocalStorage(key: string, value: string): Promise<boolean>
+getLocalStorage(key: string): Promise<string>
+```
+
+- Values are strings: `JSON.stringify` the record. **There is no delete method**: clearing means `setLocalStorage(key, '')`, and an empty or unparseable read must be treated as "nothing saved".
+- The behaviour of `getLocalStorage` for a never-written key is undocumented (empty string vs rejection): handle BOTH as absent, and wrap every storage call in the existing bridge timeout pattern.
+- Unknown and accepted: whether the simulator implements the storage bridge calls. If it does not, the lead verifies flow logic via console evidence in the simulator and persistence gets confirmed on hardware. Do not let a simulator storage failure take down startup: any storage error means "no saved journey" and the app proceeds normally.
+
+---
+
+#### T20 — Cheapest badge: priced options only (correction to Sol's round K decision)
+
+In `comparableFareInPence`, a walking-only journey returns `undefined` (not 0), and any fare that is not a finite number **greater than zero** is also `undefined`. Net effect: the Cheapest badge lands on the lowest-priced option costing more than £0; walking-only cards render exactly as now but can never be badged Cheapest. Acceptance: on the Euston-to-Hoxton fixture the £1.75 bus takes Cheapest while the walking card renders unbadged; Fastest logic unchanged.
+
+#### T21 — Save a journey, begin it from the glasses
+
+**Model (one slot, saving arms it):** a single saved-journey slot; saving a journey makes it the standing "next journey". Multiple saved routes are a later round if Jack wants them. Record, JSON-stringified under key `savedJourney`:
+
+```typescript
+{ version: 1, savedAt: number,            // epoch ms
+  from: { endpoint: string, label: string },  // endpoint = icsId or "lat,lon", label = display name
+  to:   { endpoint: string, label: string },
+  timing: { mode: 'now' | 'departing' | 'arriving', date?: string, time?: string },  // the planned query params
+  signature: string,                      // the round K routeSignature of the chosen journey
+  journey: Journey }                      // snapshot, for display only, never for live interpolation
+```
+
+**Expiry: 24 hours from `savedAt`** (Jack's instinct, lead agrees, and it is safe because beginning a journey ALWAYS refetches, below). An expired record is treated as absent and cleared best-effort.
+
+**Saving (phone):** each journey option card gains a quiet secondary "Save for later" action beside Go. Saving writes the record (bridge storage, through the timeout wrapper) and confirms inline on the card ("Saved for later"). If the bridge is unavailable or the write fails, show "Saving needs the Even app" inline; never throw. Saving overwrites any previous slot.
+
+**Begin always refetches (the stale-times rule):** beginning a saved journey NEVER enters journey mode with the stored snapshot's times. Instead: re-run the journey query for the saved endpoints (reusing the existing fetch pipeline), with the saved timing params if their moment is still in the future, otherwise with no timing params (now). Pick the returned journey whose round K `routeSignature` matches the saved signature; if none matches, take the first journey. Enter journey mode with that fresh journey. This is what keeps the glasses interpolation honest no matter when the user begins.
+
+**The glasses prompt (the point of the feature):** at glasses startup, when a valid unexpired saved journey exists AND no journey is already active (restored state wins), the startup page is a prompt instead of the status board. Layout in the established centred style: `Saved journey` / `<from label> → <to label>` (cleaned names, pxTruncated to fit) / `Tap: begin   Swipe: skip   2x tap: exit`. Input on this page:
+
+- **Single tap:** begin. Update the prompt line to `Planning...` via `textContainerUpgrade` (serialised gate as ever), run the refetch-and-match, enter journey mode on success (which also clears the saved slot: a begun journey is consumed; the active-journey snapshot machinery owns it from there, and the phone flips to the active view through the existing controller). On failure, the line becomes `Couldn't plan · tap to retry`; tap retries, swipe skips.
+- **Swipe (either direction):** skip: rebuild the status board; the saved journey stays until expiry.
+- **Double tap:** the standing exit dialog, unchanged.
+
+**The phone mirror:** when the app loads with a valid saved journey and no active journey, the planner shows a banner: `Saved journey: <from> → <to>` with `Begin` (same refetch-and-match flow, then active view) and `Remove` (clears the slot). The banner also disappears if the journey is begun or the slot cleared from either side. `?dev-journey` in dev builds takes precedence over the prompt (it exists for lead verification).
+
+**Ordering and safety rules:** the storage read happens once during glasses init, after the bridge resolves and before the startup layout decision (the layout choice becomes: active journey > saved-journey prompt > status board). All storage calls go through the bridge timeout wrapper; failures mean "no saved journey". No change to the background snapshot: the saved slot lives only in bridge KV. The standing grep ban on `window.localStorage`/`indexedDB` still applies: `bridge.setLocalStorage`/`getLocalStorage` are the only storage calls.
+
+Acceptance criteria:
+
+- Builds and standing greps pass (including the browser-storage ban); no new dependencies.
+- T20: Euston-to-Hoxton fixture shows Cheapest on the £1.75 bus, walking card unbadged.
+- Phone (Playwright): Save for later on a card confirms; reload with the slot present (if the environment's bridge supports storage; otherwise console-evidence the read path) shows the banner; Begin refetches (network request observable), enters the active view with fresh times, and the slot clears; Remove clears the banner without beginning.
+- Simulator: with a saved journey present, glasses startup shows the prompt page; tap begins (console shows the refetch and the serialised rebuild into the journey page); swipe skips to the status board; double tap still raises the exit dialog; startup with an ACTIVE restored journey bypasses the prompt. If the simulator lacks storage, the lead simulates the record via the seam Sol must provide: read the record through one small injectable function so a dev-only URL parameter (`?dev-saved=<from>/<to>` style, DEV builds only, dead in production) can stand in for storage during verification.
+- Expiry: a record older than 24h is ignored and cleared (unit-style fixture check in Sol's notes is acceptable evidence).
+- T16/T17/T19 behaviours unaffected (lead re-runs the suites).
+
+Effort recommendation for Jack: **high.** Cross-context state, a new glasses input surface, storage with undocumented edge behaviour, and the refetch-and-match flow all in one round; T20 is a one-line warm-up.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
