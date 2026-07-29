@@ -1355,6 +1355,9 @@ Milestone 2 round C complete. Next: milestone 3 planning (glasses handoff).
 - **Cosmetic nits, recorded not blocking:** (1) the `dev-saved` seam shows raw endpoint IDs as the prompt's route labels (real records carry proper names from the phone; dev-only path); (2) the prompt hint line's triple-space separators collapse to single spaces because the hint passes through `cleanGlassesText` — worth a one-line exclusion in a future polish round.
 - **Deployed:** hosted copy redeployed. Version stays 0.1.3. Hardware checklist for Jack grows by: save a journey on the phone in the Even app, kill and reopen the app, confirm the glasses prompt appears and tap-begin runs phone-free; plus the standing datetime and options-stepping checks.
 
+**2026-07-29 — Packaging record (lead).** Jack requested the pack. Version bumped to 0.1.4 (0.1.3 is the version already on Even Hub and store uploads are per-version). Manifest re-validated against the packaging rules (all fields pass; name 18/20 chars, permissions array with whitelist intact). `npx evenhub pack app.json dist -o london-transit-hud.ehpk` succeeded: **london-transit-hud.ehpk, 87KB, at repo root** (gitignored as ever), containing rounds I through L (active-journey phone screen, stop lists, light restyle, full options with stepping, saved journeys). Hosted copy redeployed at 0.1.4 so sideload and store versions match. Jack uploads the .ehpk to Even Hub manually.
+
+
 ---
 
 ## Open questions for Jack
