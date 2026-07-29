@@ -119,7 +119,12 @@
       "Bash(git commit -m 'Plan round J: light solid-colour phone restyle \\(T18\\) with Jack'\\\\''s reference stills *)",
       "Bash(sed -i '' \"s|http://localhost:5173/|http://localhost:5174/|\" t16-flow.mjs)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://transit.berrydev.co.uk/)",
-      "Bash(git commit -m 'Round J: light solid-colour phone restyle \\(T18\\) *)"
+      "Bash(git commit -m 'Round J: light solid-colour phone restyle \\(T18\\) *)",
+      "Bash(curl -s \"https://transit.berrydev.co.uk/tfl/StopPoint/Search/euston?modes=tube,elizabeth-line,dlr,overground,bus\")",
+      "Bash(curl -s \"https://transit.berrydev.co.uk/geocode?q=hoxton%20hotel%20holborn\")",
+      "Bash(curl -s \"https://transit.berrydev.co.uk/tfl/Journey/JourneyResults/1000077/to/51.5172111,-0.1220985\")",
+      "Bash(curl -s \"https://transit.berrydev.co.uk/tfl/Journey/JourneyResults/1000077/to/51.5172111,-0.1220985?time=1300&date=20260729&timeIs=departing\")",
+      "Bash(git commit -m 'Plan round K: full journey options, departure stepping, datetime overflow fix \\(T19\\) *)"
     ]
   }
 }

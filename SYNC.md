@@ -780,6 +780,51 @@ Acceptance criteria:
 
 Effort recommendation for Jack: **high.** The judgement calls (exact palette values, chip colours on light, live/done/next state treatments) are the work; the mechanics are one stylesheet.
 
+### 2026-07-29 — Round K: real journey options and departure choice (T19), from Jack's field test of the light skin
+
+Jack's field notes, all three confirmed by the lead: (1) no way to see the next trains on a route, so a user who cannot make the first departure is stuck; (2) the Leave-at date-and-time box overflows its container on iOS (screenshot evidence: the white input extends past the panel edge); (3) Euston to The Hoxton (Holborn) showed only a bus option when the Northern line works fine.
+
+**The root cause of (3) is our presentation, not the data (lead-verified through the live proxy):** the default query for that exact journey returns FOUR journeys: bus 1 (13 min), **tube Northern (19 min)**, bus 68 (14 min), and a walking option, and our fastest/cheapest filter collapsed that to two bus cards. The diversity is already in the response; we throw it away.
+
+**Verified API facts for this round (all through the live proxy, 2026-07-29):**
+
+- A `Journey/JourneyResults` response carries `searchCriteria.timeAdjustments` with `earliest`, `earlier`, `later`, `latest`, each an object with `date` (YYYYMMDD), `time` (HHmm) and `timeIs` fields. Re-querying with those values as `?time=&date=&timeIs=` returns the same routes at the stepped times (verified: 13:00 step returned bus 68 at 13:02, bus 1 at 13:03, Northern at 13:04, and fresh cursors `later: 1305`, `earlier: 1245`).
+- **Do NOT use the `uri` field inside a timeAdjustment:** it embeds `app_key=[redacted]` (the proxy redacts upstream echoes). Build the query from the `date`/`time`/`timeIs` fields only, and pass the cursor's `timeIs` through verbatim (cursors from an Arrive-by search carry their own semantics).
+- `legs[].routeOptions[0].name` is the line or route identifier (`Northern`, `1`, `68`), present on tube and bus legs alike; walking legs have no route name. Fares can be absent (`fare` missing on the walking journey).
+
+---
+
+#### T19 — Show every route option, let the user pick a departure, fix the overflow
+
+**1. Options list overhaul (replaces the fastest/cheapest pair):**
+
+- Render ONE card per distinct journey from the combined default and `&mode=bus` queries. Dedupe by route signature: the ordered list of `(mode.name, routeOptions[0].name ?? '')` pairs across the journey's legs; when two journeys share a signature keep the earlier-departing one. Sort cards by arrival time, earliest first.
+- Badge rather than filter: the lowest-duration journey gets a `Fastest` badge, the lowest-fare journey a `Cheapest` badge (same journey gets both). Other cards get no badge. Keep the existing card anatomy (duration large, fare, depart/arrive times, mode chips with change points, Go) and the fare-unavailable treatment for absent fares.
+- A walking-only journey renders as a card too (it is a real option and it is free); no fare line, show the duration.
+
+**2. Departure stepping (Jack's "next trains" requirement):**
+
+- Add a `Later ›` / `‹ Earlier` control pair to the options screen (placement and form are Sol's design judgement within the current light design language). Later refetches BOTH queries with the default response's `timeAdjustments.later` cursor values; Earlier uses `earlier`. The refreshed response replaces the card list (same dedupe/badge/sort pipeline) and yields fresh cursors for the next step.
+- Steps must be abortable/stale-guarded like every other fetch (a stale step response must not clobber a newer one), with the existing inline error treatment on failure. Disable the controls while a step is in flight.
+- The user's timing selection (Now / Leave at / Arrive by) seeds the FIRST query exactly as today; stepping then walks forward or back from whatever the current page is. Changing the timing control or replanning resets the stepping state.
+- Each card's depart/arrive times are already per-journey, so stepping IS the "see the next trains and pick one" flow: step, read the times, hit Go on the departure that suits. Go hands over the selected journey object unchanged (glasses side untouched).
+
+**3. The datetime overflow bug (Jack's screenshot):**
+
+- `.datetime-field input` currently relies on `width: 100%`, and iOS WKWebView datetime controls are notorious for overflowing that. Fix with belt and braces: `min-width: 0; max-width: 100%;` on the input, `overflow: hidden` on `.datetime-field`, and verify the input's box can never exceed its parent at 320px width. Do not use `appearance: none` (it can blank datetime rendering on some iOS versions); keep the native control look.
+- This cannot be truly reproduced in desktop Chrome: the acceptance proxy is a Playwright check that the input's bounding box stays inside the panel at 320px and 390px widths, and the real verdict is Jack's next device test. Record it that way in your notes.
+
+Acceptance criteria:
+
+- Builds and standing greps pass; no new dependencies; glasses code untouched.
+- Playwright 390x660, Euston (`1000077`) to a Holborn destination: the options list shows at least three cards including a tube (Northern) card alongside the bus cards; badges appear on exactly the fastest and cheapest cards; cards are sorted by arrival.
+- Tapping `Later` replaces the list with later departures (assert every card's depart time is later than or equal to the previous page's earliest) and `Earlier` returns; controls disabled mid-flight; no page errors.
+- Go from a non-badged card (e.g. the tube option) enters journey mode with that journey on phone and glasses (simulator spot-check by the lead).
+- The datetime input's bounding box stays inside `.planner-panel` at 320px and 390px viewport widths with Leave-at active.
+- All T16/T17 suite checks still pass (the lead runs them; card-selector changes are expected and the lead will adapt the suites' card selectors if the markup legitimately changed, noting what changed).
+
+Effort recommendation for Jack: **high.** This reshapes the product's core choice screen; the stepping state machine and dedupe need care, and the design judgement on card density is real.
+
 ### 2026-07-28 — Pre-launch checklist (before the app goes public on Even Hub)
 
 - **Take the web front-end down (Jack's direction, 2026-07-28):** `transit.berrydev.co.uk` becomes backend-only at public launch. The Caddy site block keeps only the `/tfl/*`, `/geocode` and `/healthz` handles; the static `file_server` handle and the bind mount go, with the root returning 404. The hosted front-end exists for development convenience only and must not be a second public way into the app. Lead's job (infra), one Caddyfile edit plus compose volume removal, committed on the droplet's connect-remote checkout.
