@@ -15,16 +15,17 @@
   </head>
   <body>
     <main id="app-shell" class="app-shell">
-      <header class="hero">
+      <div id="planner-view" class="planner-view">
+        <header class="hero">
         <div class="brand-mark" aria-hidden="true">
           <span></span>
           <span></span>
           <span></span>
         </div>
         <h1 class="brand-title">London Transit HUD</h1>
-      </header>
+        </header>
 
-      <section class="planner-panel" aria-labelledby="planner-title">
+        <section class="planner-panel" aria-labelledby="planner-title">
         <div class="section-heading">
           <div>
             <p class="step-label">Plan a journey</p>
@@ -145,9 +146,9 @@
             <span class="button-arrow" aria-hidden="true">→</span>
           </button>
         </form>
-      </section>
+        </section>
 
-      <section id="results-section" class="results-section" aria-labelledby="results-title" hidden>
+        <section id="results-section" class="results-section" aria-labelledby="results-title" hidden>
         <div class="section-heading">
           <div>
             <p class="step-label">Your options</p>
@@ -155,13 +156,37 @@
           </div>
         </div>
         <div id="journey-results" class="journey-results"></div>
-      </section>
+        </section>
 
-      <footer class="phone-footer">
-        <span>Powered by TfL live data</span>
-        <span class="footer-separator" aria-hidden="true"></span>
-        <span>Glasses handoff coming next</span>
-      </footer>
+        <footer class="phone-footer">
+          <span>Powered by TfL live data</span>
+          <span class="footer-separator" aria-hidden="true"></span>
+          <span>Live on your glasses</span>
+        </footer>
+      </div>
+
+      <section
+        id="active-journey-view"
+        class="active-journey-view"
+        aria-labelledby="active-journey-title"
+        hidden
+      >
+        <header class="active-journey-header">
+          <div>
+            <p class="step-label">Journey in progress</p>
+            <h1 id="active-journey-title">Your journey</h1>
+          </div>
+          <button id="end-journey-button" class="end-journey-button" type="button">
+            End journey
+          </button>
+        </header>
+        <div
+          id="active-journey-summary"
+          class="active-journey-summary"
+          aria-label="Journey summary"
+        ></div>
+        <ol id="active-stage-list" class="active-stage-list"></ol>
+      </section>
     </main>
 
     <script type="module" src="/src/main.ts"></script>

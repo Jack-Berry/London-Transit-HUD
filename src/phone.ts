@@ -1,4 +1,9 @@
 import { now } from './clock'
+import {
+  activeJourneyStageIndexAt,
+  deriveJourneyStages,
+  type JourneyStage,
+} from './journey-mode'
 
 interface StationMatch {
   id: string
@@ -62,6 +67,8 @@ export interface JourneyLeg {
   }
   arrivalPoint?: {
     commonName?: string
+    lat?: number
+    lon?: number
   }
   routeOptions?: Array<{
     name?: string
@@ -125,12 +132,22 @@ const timeFormatter = new Intl.DateTimeFormat('en-GB', {
 let selectedJourney: Journey | undefined
 let journeySelectionHandler: (journey: Journey) => void = () => undefined
 
+export interface PhoneUiController {
+  showActiveJourney: (journey: Journey) => void
+  resetPlanner: () => void
+}
+
 export function initializePhoneUi(
   apiBase: string,
   onJourneySelected: (journey: Journey) => void,
-): void {
-  journeySelectionHandler = onJourneySelected
+  onJourneyEnded: () => void,
+): PhoneUiController {
   const appShell = getElement<HTMLElement>('app-shell')
+  const plannerView = getElement<HTMLElement>('planner-view')
+  const activeView = getElement<HTMLElement>('active-journey-view')
+  const activeSummary = getElement<HTMLElement>('active-journey-summary')
+  const activeStageList = getElement<HTMLOListElement>('active-stage-list')
+  const endJourneyButton = getElement<HTMLButtonElement>('end-journey-button')
   const form = getElement<HTMLFormElement>('journey-form')
   const fromControl = createStationControl('from', appShell)
   const toControl = createStationControl('to', appShell)
@@ -144,6 +161,8 @@ export function initializePhoneUi(
   const timingInputs = Array.from(
     form.querySelectorAll<HTMLInputElement>('input[name="timing"]'),
   )
+  let activeJourney: Journey | undefined
+  let activeJourneyInterval: ReturnType<typeof setInterval> | undefined
 
   datetimeInput.min = toDatetimeLocalValue(new Date(now()))
   datetimeInput.value = toDatetimeLocalValue(nextHalfHour())
@@ -236,6 +255,89 @@ export function initializePhoneUi(
     })
   }
 
+  const stopActiveJourneyTick = (): void => {
+    if (activeJourneyInterval !== undefined) {
+      clearInterval(activeJourneyInterval)
+      activeJourneyInterval = undefined
+    }
+  }
+
+  const updateActiveStage = (): void => {
+    if (activeJourney === undefined) {
+      return
+    }
+
+    const activeIndex = activeJourneyStageIndexAt(activeJourney, now())
+    activeStageList.querySelectorAll<HTMLElement>('.active-stage').forEach(
+      (element, index) => {
+        const isActive = index === activeIndex
+        element.classList.toggle('is-live', isActive)
+        if (isActive) {
+          element.setAttribute('aria-current', 'step')
+        } else {
+          element.removeAttribute('aria-current')
+        }
+      },
+    )
+  }
+
+  const showActiveJourney = (journey: Journey): void => {
+    activeJourney = journey
+    renderActiveJourneySummary(activeSummary, journey)
+    renderActiveJourneyStages(activeStageList, journey)
+    plannerView.hidden = true
+    activeView.hidden = false
+    appShell.classList.remove('search-active', 'input-focused')
+    appShell.scrollTop = 0
+    updateActiveStage()
+    stopActiveJourneyTick()
+    activeJourneyInterval = setInterval(updateActiveStage, 10_000)
+  }
+
+  const resetPlanner = (): void => {
+    stopActiveJourneyTick()
+    activeJourney = undefined
+    selectedJourney = undefined
+
+    if (activeSearchControl !== undefined) {
+      exitSearchTakeover(activeSearchControl)
+    }
+    for (const control of stationControls) {
+      cancelStationSearch(control)
+      hideSuggestions(control)
+      control.selected = undefined
+      control.input.value = ''
+      control.input.removeAttribute('data-selected')
+      control.input.setAttribute('aria-invalid', 'false')
+      control.error.textContent = ''
+    }
+
+    form.reset()
+    datetimeField.hidden = true
+    datetimeInput.required = false
+    datetimeInput.min = toDatetimeLocalValue(new Date(now()))
+    datetimeInput.value = toDatetimeLocalValue(nextHalfHour())
+    plannerError.textContent = ''
+    results.replaceChildren()
+    resultsSection.hidden = true
+    setPlanningState(planButton, false)
+    activeSummary.replaceChildren()
+    activeStageList.replaceChildren()
+    activeView.hidden = true
+    plannerView.hidden = false
+    appShell.classList.remove('search-active', 'input-focused')
+    appShell.scrollTop = 0
+  }
+
+  journeySelectionHandler = journey => {
+    onJourneySelected(journey)
+  }
+
+  endJourneyButton.addEventListener('click', () => {
+    onJourneyEnded()
+    resetPlanner()
+  })
+
   document.addEventListener('pointerdown', event => {
     const target = event.target
     if (!(target instanceof Node)) {
@@ -271,6 +373,11 @@ export function initializePhoneUi(
       results,
     })
   })
+
+  return {
+    showActiveJourney,
+    resetPlanner,
+  }
 }
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -942,6 +1049,169 @@ function createJourneyCard(
 
   card.append(header, summary, legs, goButton)
   return card
+}
+
+function renderActiveJourneySummary(
+  container: HTMLElement,
+  journey: Journey,
+): void {
+  container.replaceChildren(
+    createActiveSummaryItem('Depart', formatTimeValue(journey.startDateTime)),
+    createActiveSummaryItem('Arrive', formatTimeValue(journey.arrivalDateTime)),
+    createActiveSummaryItem('Duration', `${Math.round(journey.duration)} min`),
+    createActiveSummaryItem('Fare', formatFare(journey)),
+  )
+}
+
+function createActiveSummaryItem(label: string, value: string): HTMLElement {
+  const item = document.createElement('div')
+  const term = document.createElement('span')
+  const detail = document.createElement('strong')
+  term.textContent = label
+  detail.textContent = value
+  item.append(term, detail)
+  return item
+}
+
+function renderActiveJourneyStages(
+  container: HTMLOListElement,
+  journey: Journey,
+): void {
+  const stages = deriveJourneyStages(journey)
+  container.replaceChildren(...stages.map((stage, index) => (
+    createActiveStage(stage, index, stages.length)
+  )))
+}
+
+function createActiveStage(
+  stage: JourneyStage,
+  index: number,
+  total: number,
+): HTMLLIElement {
+  const item = document.createElement('li')
+  item.className = 'active-stage'
+
+  const marker = document.createElement('span')
+  marker.className = 'active-stage__marker'
+  marker.textContent = String(index + 1)
+  marker.setAttribute('aria-hidden', 'true')
+
+  const content = document.createElement('article')
+  content.className = 'active-stage__content'
+
+  const eyebrow = document.createElement('div')
+  eyebrow.className = 'active-stage__eyebrow'
+
+  const stageNumber = document.createElement('span')
+  stageNumber.className = 'active-stage__number'
+  stageNumber.textContent = `Stage ${index + 1} of ${total}`
+
+  if (stage.type === 'arrive') {
+    eyebrow.append(stageNumber)
+    const title = document.createElement('h2')
+    title.textContent = 'Walk to your destination'
+    content.append(eyebrow, title)
+  } else {
+    eyebrow.append(createModeChip(stage.leg.mode?.name ?? stage.type), stageNumber)
+
+    const title = document.createElement('h2')
+    title.textContent = stage.leg.instruction?.summary
+      ?? (
+        stage.type === 'walk'
+          ? `Walk to ${stage.leg.arrivalPoint?.commonName ?? 'your next stop'}`
+          : stage.leg.routeOptions?.[0]?.name ?? 'Journey stage'
+      )
+    content.append(eyebrow, title)
+
+    if (stage.type === 'ride') {
+      const route = document.createElement('p')
+      route.className = 'active-stage__route'
+      route.append(
+        createStageEndpoint(
+          'From',
+          stage.leg.departurePoint?.commonName ?? 'Departure',
+          stage.leg.departureTime,
+        ),
+        createStageArrow(),
+        createStageEndpoint(
+          'To',
+          stage.leg.arrivalPoint?.commonName ?? 'Arrival',
+          stage.leg.arrivalTime,
+        ),
+      )
+
+      const stops = stage.leg.path?.stopPoints?.length ?? 0
+      const stopCount = document.createElement('p')
+      stopCount.className = 'active-stage__meta'
+      stopCount.textContent = `${stops} ${stops === 1 ? 'stop' : 'stops'}`
+      content.append(route, stopCount)
+    } else {
+      const duration = document.createElement('p')
+      duration.className = 'active-stage__meta'
+      duration.textContent = `About ${Math.round(stage.leg.duration ?? 0)} min`
+
+      const mapsLink = document.createElement('a')
+      mapsLink.className = 'maps-link'
+      mapsLink.href = walkingMapsUrl(stage.leg)
+      mapsLink.target = '_blank'
+      mapsLink.rel = 'noopener noreferrer'
+      mapsLink.textContent = 'Open in Google Maps'
+      content.append(duration, mapsLink)
+    }
+  }
+
+  item.append(marker, content)
+  return item
+}
+
+function createStageEndpoint(
+  label: string,
+  name: string,
+  time?: string,
+): HTMLElement {
+  const endpoint = document.createElement('span')
+  const labelElement = document.createElement('small')
+  const nameElement = document.createElement('strong')
+  const timeElement = document.createElement('time')
+  labelElement.textContent = label
+  nameElement.textContent = name
+  timeElement.textContent = formatTimeValue(time)
+  endpoint.append(labelElement, nameElement, timeElement)
+  return endpoint
+}
+
+function createStageArrow(): HTMLElement {
+  const arrow = document.createElement('span')
+  arrow.className = 'active-stage__arrow'
+  arrow.setAttribute('aria-hidden', 'true')
+  arrow.textContent = '→'
+  return arrow
+}
+
+function walkingMapsUrl(leg: JourneyLeg): string {
+  const url = new URL('https://www.google.com/maps/dir/')
+  url.searchParams.set('api', '1')
+  const latitude = leg.arrivalPoint?.lat
+  const longitude = leg.arrivalPoint?.lon
+  const destination = (
+    typeof latitude === 'number'
+    && Number.isFinite(latitude)
+    && typeof longitude === 'number'
+    && Number.isFinite(longitude)
+  )
+    ? `${latitude},${longitude}`
+    : leg.arrivalPoint?.commonName ?? 'Destination'
+  url.searchParams.set('destination', destination)
+  url.searchParams.set('travelmode', 'walking')
+  return url.toString()
+}
+
+function formatTimeValue(value?: string): string {
+  if (value === undefined) {
+    return '—'
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : timeFormatter.format(date)
 }
 
 function createTime(label: string, value: string): HTMLElement {

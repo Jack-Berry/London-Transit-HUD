@@ -5,7 +5,11 @@ import {
   CreateStartUpPageContainer,
   RebuildPageContainer,
 } from '@evenrealities/even_hub_sdk'
-import { initializePhoneUi, type Journey } from './phone'
+import {
+  initializePhoneUi,
+  type Journey,
+  type PhoneUiController,
+} from './phone'
 import {
   ALERT_CONTAINER_WIDTH,
   ALERT_CONTAINER_X,
@@ -62,8 +66,10 @@ let journeyState: JourneyState = {
 }
 let journeyStateVersion = 0
 let journeyRenderRequest: (() => void) | undefined
+let journeyEndRequest: (() => void) | undefined
 let hudTimerCancelRequest: (() => void) | undefined
 let journeyLiveResetRequest: (() => void) | undefined
+let phoneUiController: PhoneUiController | undefined
 
 function restoreJourneyState(saved: unknown): void {
   if (saved === null || typeof saved !== 'object') {
@@ -83,6 +89,11 @@ function restoreJourneyState(saved: unknown): void {
 
   if (journeyState.active) {
     journeyRenderRequest?.()
+  }
+  if (journeyState.active && journeyState.journey !== null) {
+    phoneUiController?.showActiveJourney(journeyState.journey)
+  } else {
+    phoneUiController?.resetPlanner()
   }
 }
 
@@ -112,7 +123,14 @@ window.__restoreState = snapshot => {
 if (import.meta.env.DEV) {
   configureDevClock()
 }
-initializePhoneUi(API_BASE, enterJourneyMode)
+phoneUiController = initializePhoneUi(
+  API_BASE,
+  enterJourneyMode,
+  endJourneyMode,
+)
+if (journeyState.active && journeyState.journey !== null) {
+  phoneUiController.showActiveJourney(journeyState.journey)
+}
 const devJourneyLoad = import.meta.env.DEV ? loadDevJourney() : Promise.resolve()
 void initializeApplication().catch(() => {
   console.info('Glasses bridge unavailable')
@@ -133,7 +151,22 @@ function enterJourneyMode(journey: Journey): void {
   journeyStateVersion += 1
   journeyLiveResetRequest?.()
   console.log('Journey handoff')
+  phoneUiController?.showActiveJourney(journey)
   journeyRenderRequest?.()
+}
+
+function endJourneyMode(): void {
+  journeyState = {
+    active: false,
+    journey: null,
+    stageIndex: 0,
+    hudHidden: false,
+  }
+  journeyStateVersion += 1
+  hudTimerCancelRequest?.()
+  journeyLiveResetRequest?.()
+  console.log('Journey ended')
+  journeyEndRequest?.()
 }
 
 function configureDevClock(): void {
@@ -499,6 +532,8 @@ async function initializeGlasses(): Promise<void> {
   let bridgeCallPending: Promise<unknown> | null = null
   let journeyRenderQueued = false
   let journeyRenderInFlight = false
+  let statusRenderQueued = false
+  let statusRenderInFlight = false
   let hiddenClearQueued = false
   let hiddenNoticeTimer: ReturnType<typeof setTimeout> | undefined
   let journeyTickInterval: ReturnType<typeof setInterval> | undefined
@@ -532,6 +567,8 @@ async function initializeGlasses(): Promise<void> {
       bridgeCallPending = null
       if (exitRequestQueued) {
         void flushExitRequest()
+      } else if (statusRenderQueued) {
+        void flushStatusBoardRender()
       } else if (journeyRenderQueued) {
         void flushJourneyRender()
       } else if (liveUpdateQueued) {
@@ -744,6 +781,8 @@ async function initializeGlasses(): Promise<void> {
       !liveUpdateQueued
       || liveUpdateInFlight
       || bridgeCallPending !== null
+      || statusRenderQueued
+      || statusRenderInFlight
       || journeyRenderQueued
       || journeyRenderInFlight
       || !journeyState.active
@@ -881,11 +920,77 @@ async function initializeGlasses(): Promise<void> {
     void flushJourneyRender()
   }
 
+  function requestStatusBoardRender(): void {
+    cancelHiddenNoticeTimer()
+    stopJourneyTick()
+    journeyRenderQueued = false
+    liveUpdateQueued = false
+    hiddenClearQueued = false
+    desiredBarContent = undefined
+    desiredAlertContent = ' '
+    statusRenderQueued = true
+    pauseRefreshInterval()
+    console.log('Returning glasses to status board')
+    void flushStatusBoardRender()
+  }
+
+  async function flushStatusBoardRender(): Promise<void> {
+    if (
+      !statusRenderQueued
+      || statusRenderInFlight
+      || bridgeCallPending !== null
+    ) {
+      return
+    }
+
+    const containers = createStatusContainers()
+    statusRenderInFlight = true
+    const rawBridgeCall = startBridgeCall(
+      'Status board rebuild',
+      () => bridge.rebuildPageContainer(
+        new RebuildPageContainer({
+          containerTotalNum: containers.length,
+          textObject: containers,
+        }),
+      ),
+    )
+    if (rawBridgeCall === undefined) {
+      statusRenderInFlight = false
+      return
+    }
+
+    statusRenderQueued = false
+    try {
+      const wasRebuilt = await withBridgeTimeout(
+        rawBridgeCall,
+        'status rebuildPageContainer',
+      )
+      if (!wasRebuilt) {
+        console.error('Status board rebuild failed')
+        return
+      }
+
+      renderedAlertContent = undefined
+      renderedBarContent = undefined
+      console.log('Status board restored after journey')
+      setTimeout(() => {
+        void refreshStatuses()
+        startRefreshInterval()
+      }, 0)
+    } catch (error) {
+      console.error('Unable to rebuild the status board:', error)
+    } finally {
+      statusRenderInFlight = false
+    }
+  }
+
   async function flushJourneyRender(): Promise<void> {
     if (
       !journeyRenderQueued
       || journeyRenderInFlight
       || bridgeCallPending !== null
+      || statusRenderQueued
+      || statusRenderInFlight
     ) {
       return
     }
@@ -1046,6 +1151,7 @@ async function initializeGlasses(): Promise<void> {
 
   if (result === 0) {
     journeyRenderRequest = requestJourneyRender
+    journeyEndRequest = requestStatusBoardRender
     hudTimerCancelRequest = cancelHiddenNoticeTimer
     journeyLiveResetRequest = () => {
       dismissedAlertKeys.clear()
@@ -1097,6 +1203,7 @@ async function initializeGlasses(): Promise<void> {
           pauseRefreshInterval()
           stopJourneyTick()
           journeyRenderRequest = undefined
+          journeyEndRequest = undefined
           hudTimerCancelRequest = undefined
           journeyLiveResetRequest = undefined
           unsubscribe()

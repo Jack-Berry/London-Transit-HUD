@@ -68,6 +68,25 @@ export function deriveJourneyStages(journey: Journey): JourneyStage[] {
   return stages
 }
 
+export function activeJourneyStageIndexAt(
+  journey: Journey,
+  atMs: number,
+): number {
+  const stages = deriveJourneyStages(journey)
+  if (stages.length === 0) {
+    return 0
+  }
+
+  for (let index = 0; index < journey.legs.length; index += 1) {
+    const range = legTimeRange(journey.legs[index]!)
+    if (range !== undefined && atMs < range.arrivalMs) {
+      return index
+    }
+  }
+
+  return stages.length - 1
+}
+
 export function buildStagePage(
   stage: JourneyStage,
   stageIndex: number,
@@ -401,6 +420,21 @@ function legTimeline(leg: JourneyLeg): {
   arrivalMs: number
   stopCount: number
 } | undefined {
+  const range = legTimeRange(leg)
+  if (range === undefined) {
+    return undefined
+  }
+
+  return {
+    ...range,
+    stopCount: leg.path?.stopPoints?.length ?? 0,
+  }
+}
+
+function legTimeRange(leg: JourneyLeg): {
+  departureMs: number
+  arrivalMs: number
+} | undefined {
   const departureMs = Date.parse(leg.departureTime ?? '')
   const arrivalMs = Date.parse(leg.arrivalTime ?? '')
   if (
@@ -414,7 +448,6 @@ function legTimeline(leg: JourneyLeg): {
   return {
     departureMs,
     arrivalMs,
-    stopCount: leg.path?.stopPoints?.length ?? 0,
   }
 }
 

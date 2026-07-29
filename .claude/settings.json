@@ -87,7 +87,25 @@
       "Bash(rsync -az dist/app.json deploy@car-proxy.berrydev.co.uk:~/london-transit-hud-site/app.json)",
       "Bash(unzip -l london-transit-hud.ehpk)",
       "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('packed version:', d['version'], '| package_id:', d['package_id']\\)\")",
-      "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('version:', d['version'], '|', d['package_id']\\)\")"
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('dist/app.json'\\)\\); print\\('version:', d['version'], '|', d['package_id']\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(node t16-flow.mjs)",
+      "Bash(sed -i '' \"s|page.locator\\('.journey-card button', { hasText: /go/i }\\).first\\(\\).click\\(\\)|page.locator\\('.journey-card .go-button'\\).first\\(\\).click\\(\\)|\" t16-flow.mjs)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-stage0.png)",
+      "Bash(curl -s -X POST http://127.0.0.1:9898/api/input -H 'Content-Type: application/json' -d '{\"action\":\"up\"}')",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-stage1.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-stage0-back.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-hidden.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o glasses-restored.png)",
+      "Bash(curl -s --max-time 15 http://127.0.0.1:9898/api/screenshot/webview -o webview-active.png)",
+      "Bash(curl -s --max-time 15 http://127.0.0.1:9898/api/screenshot/webview -o webview-offset.png)",
+      "Bash(osascript -e 'tell application \"System Events\" to get {name, position, size} of every window of \\(every process whose background only is false\\)')",
+      "Bash(lsof -nP -iTCP -sTCP:LISTEN)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-before-end.png)",
+      "Bash(curl -s http://127.0.0.1:9898/api/screenshot/glasses -o /private/tmp/claude-501/-Users-jackberry-Code-Projects-London-Transit-HUD/0cb16943-a984-495c-a306-137fa839bcad/scratchpad/glasses-after-end.png)",
+      "Bash(pkill -f \"vite.*5173\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://transit.berrydev.co.uk/)",
+      "Bash(git commit -m 'Round I: phone active-journey screen with clean-slate reset \\(T16\\) *)"
     ]
   }
 }
