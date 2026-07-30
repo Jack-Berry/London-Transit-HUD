@@ -8,3 +8,6 @@ dist/
 .env.*
 !.env.example
 *.ehpk
+
+# Local working docs
+two-agent-workflow.md
